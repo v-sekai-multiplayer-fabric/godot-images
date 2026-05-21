@@ -35,8 +35,9 @@ export EMSDK_ROOT := WORLD_PWD + "/emsdk"
 export OSXCROSS_ROOT := WORLD_PWD + "/osxcross"
 export MINGW_PREFIX := WORLD_PWD + "/mingw"
 
-default:
-    @just --list
+# Default recipe: fetch the engine at the pinned tag and build both
+# ghcr.io images (editor + runtime). Run `just --list` to see every recipe.
+default: fetch-godot build-docker
 
 # ── Engine source ────────────────────────────────────────────────────────
 
