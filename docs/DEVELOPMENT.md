@@ -71,33 +71,80 @@ The fork is freshly fetched on every `fetch-godot` invocation, so no
 in-tree copy ever drifts. Override for an ad-hoc build with
 `just fetch-godot <branch-or-sha>`.
 
-## Why no CI
+## CI
 
-The engine build is a slow (~1h fresh, faster with the SCons cache),
-wide-radius operation. Keeping it out of CI keeps the runner budget free
-for downstream repos (zone-baker, zone-server) and avoids a 5- or 10-cell
-matrix that mostly recompiles the same engine. When new binaries are
-needed downstream, a maintainer runs the relevant `just` recipe and
-pushes the resulting image / artifact themselves.
+There is a manual GitHub Actions workflow at
+[`.github/workflows/build.yml`](../.github/workflows/build.yml) that just
+calls `just build-docker-*` on `ubuntu-latest` and pushes to ghcr.io.
+Triggers: `workflow_dispatch`, weekly Monday cron, and the
+`engine-updated` `repository_dispatch` event. There is intentionally no
+`push:` trigger — engine compiles are too slow to run on every doc tweak.
+
+CI uses the same justfile and Dockerfile as a local build; the only
+difference is that the workflow injects the Tigris secrets as `env:`
+which the justfile then forwards via `--build-arg` so the in-Docker
+sccache reads/writes the shared Tigris bucket. Cache entries from a
+developer's `just build-docker` accumulate in the same pool as CI runs.
+
+## sccache pool
+
+A [Tigris](https://www.tigrisdata.com/) (Fly.io) S3-compatible bucket
+named `godot-images-sccache` backs sccache for both CI and developer
+machines. Provisioned with:
+
+```sh
+fly storage create --name godot-images-sccache --org personal
+```
+
+The credentials live in two places:
+
+- **CI**: as repo-level GitHub Actions secrets on this repo:
+  `SCCACHE_BUCKET`, `SCCACHE_ENDPOINT`, `SCCACHE_REGION`,
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
+- **Local**: `~/.sccache-tigris.env` (mode `0600`, never committed).
+  Source it to switch your host sccache from local-disk to the shared
+  bucket:
+
+  ```sh
+  source ~/.sccache-tigris.env
+  just                  # default = fetch-godot + build-docker
+  sccache --show-stats  # see hits / misses against Tigris
+  ```
+
+Cache entries are keyed per-compiler (preprocessed input + flags +
+compiler hash), so the bucket simultaneously holds macOS clang, Linux
+gcc, MinGW, and Emscripten entries without collision — each platform
+pulls only the entries that match its own compiler.
+
+## Engine compile cache layering
+
+Two complementary caches back every scons invocation:
+
+1. **sccache** — compiler-output cache. Shared across the editor and
+   runtime builds (large overlap because most of `core/` and `scene/`
+   compile identically across `target=editor` vs `target=template_release`).
+   Shared across machines via the Tigris bucket.
+2. **SCons file cache** (`cache_path=...`) — avoids re-running build-graph
+   nodes for unchanged inputs. Lives in `godot/.scons_cache` on host
+   builds, and in a buildx cache mount inside Docker.
 
 ## Layout
 
 ```
-Dockerfile             parameterised by TARGET + BINARY_NAME build-args;
-                       invoked by `just build-docker-{editor,runtime}`
+Dockerfile             parameterised by TARGET + BINARY_NAME build-args
+                       and the SCCACHE_* env vars; invoked by
+                       `just build-docker-{editor,runtime}`
 justfile               every build recipe (cross-compile setup + scons
-                       dispatch + docker build/push)
+                       dispatch + docker build/push); forwards sccache
+                       creds into buildx via _sccache_buildargs
+.github/workflows/
+  build.yml            manual + weekly CI that calls `just build-docker-*`
+                       with the same justfile, secrets injected as env
 ```
 
-## Cache
+## Toolchain caches
 
-- **Native builds**: SCons object cache lives under `godot/.scons_cache`
-  (created automatically on first build). Subsequent re-runs at the same
-  pin reuse it.
-- **Docker (Linux)**: `docker buildx` cache is local — pass
-  `--cache-from`/`--cache-to` flags to the `build-docker-*` recipes if
-  you want to share the cache between machines or runs.
-- **Toolchain caches**: `osxcross`, `mingw`, `vulkan_sdk`, `emsdk`,
-  `android_sdk`, and `aarch64-godot-linux-gnu_sdk-buildroot` are cached
-  in the working directory by their respective `fetch-*` / `setup-*`
-  recipes and reused on subsequent runs.
+`osxcross`, `mingw`, `vulkan_sdk`, `emsdk`, `android_sdk`, and
+`aarch64-godot-linux-gnu_sdk-buildroot` are cached in the working
+directory by their respective `fetch-*` / `setup-*` recipes and reused
+on subsequent runs. They're all listed in `.gitignore`.

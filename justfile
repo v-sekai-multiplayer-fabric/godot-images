@@ -177,6 +177,23 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
         rename 'aarch64-godot-linux-gnu-' '' ${ARM64_ROOT}/bin/*;
         export PATH="$ARM64_ROOT/bin:$PATH";
     fi
+    # sccache compiler-output cache — used if installed. Append this
+    # checkout's godot/ to SCCACHE_BASEDIRS so cache entries normalise
+    # to a relative path and hits transfer across parallel godot trees
+    # (your ~/.zshrc already lists ~/Desktop/godot and ~/Desktop/turboquant-godot;
+    # this just appends ${WORLD_PWD}/${GODOT_DIR}).
+    SCCACHE_FLAGS=""
+    if command -v sccache >/dev/null 2>&1; then
+        SCCACHE_FLAGS="c_compiler_launcher=sccache cpp_compiler_launcher=sccache"
+        EXTRA_BASEDIR="${WORLD_PWD}/${GODOT_DIR}"
+        if [ -n "${SCCACHE_BASEDIRS:-}" ]; then
+            export SCCACHE_BASEDIRS="${SCCACHE_BASEDIRS}:${EXTRA_BASEDIR}"
+        else
+            export SCCACHE_BASEDIRS="${EXTRA_BASEDIR}"
+        fi
+        sccache --start-server >/dev/null 2>&1 || true
+        sccache --zero-stats >/dev/null 2>&1 || true
+    fi
     cd $GODOT_DIR
     case "{{platform}}" in
         macos)
@@ -198,6 +215,7 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
                     generate_bundle={{osx_bundle}} \
                     debug_symbols=yes \
                     separate_debug_symbols=yes \
+                    ${SCCACHE_FLAGS} \
                     {{extra_options}}
             ;;
         windows)
@@ -217,6 +235,7 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
                 ${WIN_TOOLCHAIN} \
                 debug_symbols=yes \
                 separate_debug_symbols=yes \
+                ${SCCACHE_FLAGS} \
                 {{extra_options}}
             ;;
         android)
@@ -227,6 +246,7 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
                     precision={{precision}} \
                     target={{target}} \
                     test=yes \
+                    ${SCCACHE_FLAGS} \
                     {{extra_options}} \
                     #debug_symbols=yes    # Editor build runs out of space in Github Runner
             ;;
@@ -248,6 +268,7 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
                     accesskit=no \
                     linuxbsd_speechd=no \
                     $DEBUG_SYMBOLS \
+                    ${SCCACHE_FLAGS} \
                     {{extra_options}}
             ;;
         web)
@@ -262,6 +283,7 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
                     dlink_enabled=yes \
                     debug_symbols=no \
                     disable_exceptions=yes \
+                    ${SCCACHE_FLAGS} \
                     {{extra_options}}
             ;;
         ios)
@@ -283,6 +305,7 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
                     generate_bundle={{osx_bundle}} \
                     debug_symbols=yes \
                     separate_debug_symbols=yes \
+                    ${SCCACHE_FLAGS} \
                     {{extra_options}}
             ;;
         *)
@@ -290,6 +313,9 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
             exit 1
             ;;
     esac
+    if [ -n "${SCCACHE_FLAGS}" ]; then
+        sccache --show-stats || true
+    fi
     just handle-special-cases {{platform}} {{target}}
 
     # Remove intermediate build files before copy
@@ -382,6 +408,17 @@ package-tpz folder tpzname versionpy precision="double":
       && zip -r ../{{tpzname}}.tpz templates && cd ..
     rm -r tpz_temp
 
+# Print current sccache stats (works for both host and the most recent
+# Docker build — the in-container sccache writes to a buildx cache volume
+# whose stats are only viewable from within the build).
+sccache-stats:
+    #!/usr/bin/env bash
+    if command -v sccache >/dev/null 2>&1; then
+        sccache --show-stats
+    else
+        echo "sccache not installed; install with: brew install sccache (macOS) or cargo install sccache"
+    fi
+
 is-github-actions:
     #!/usr/bin/env bash
     if [[ "$CI" == "true" && "$GITHUB_ACTIONS" == "true" ]]; then
@@ -396,6 +433,18 @@ is-github-actions:
 # `just fetch-godot` first; the build-context flag points buildx at the
 # checkout without copying it into a tarball context.
 
+# Forward sccache S3 credentials (Tigris) into the build if the host has
+# them in the environment — source ~/.sccache-tigris.env first to enable.
+_sccache_buildargs := \
+    if env_var_or_default("SCCACHE_BUCKET", "") == "" { "" } \
+    else { \
+        "--build-arg SCCACHE_BUCKET=" + env_var("SCCACHE_BUCKET") + " " + \
+        "--build-arg SCCACHE_ENDPOINT=" + env_var_or_default("SCCACHE_ENDPOINT", "") + " " + \
+        "--build-arg SCCACHE_REGION=" + env_var_or_default("SCCACHE_REGION", "auto") + " " + \
+        "--build-arg AWS_ACCESS_KEY_ID=" + env_var_or_default("AWS_ACCESS_KEY_ID", "") + " " + \
+        "--build-arg AWS_SECRET_ACCESS_KEY=" + env_var_or_default("AWS_SECRET_ACCESS_KEY", "") \
+    }
+
 # Build the Linux x86_64 editor image (used by zone-baker).
 build-docker-editor tag="latest":
     #!/usr/bin/env bash
@@ -404,6 +453,7 @@ build-docker-editor tag="latest":
     docker buildx build \
         --build-arg TARGET=editor \
         --build-arg BINARY_NAME=godot.linuxbsd.editor.double.x86_64 \
+        {{_sccache_buildargs}} \
         --build-context "godot-src=${WORLD_PWD}/${GODOT_DIR}" \
         --tag "${DOCKER_EDITOR_IMAGE}:{{tag}}" \
         --load \
@@ -418,6 +468,7 @@ build-docker-runtime tag="latest":
     docker buildx build \
         --build-arg TARGET=template_release \
         --build-arg BINARY_NAME=godot.linuxbsd.template_release.double.x86_64 \
+        {{_sccache_buildargs}} \
         --build-context "godot-src=${WORLD_PWD}/${GODOT_DIR}" \
         --tag "${DOCKER_RUNTIME_IMAGE}:{{tag}}" \
         --load \
