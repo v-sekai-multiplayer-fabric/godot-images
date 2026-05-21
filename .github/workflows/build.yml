@@ -1,0 +1,102 @@
+name: build
+
+# Builds both engine flavours from v-sekai-multiplayer-fabric/godot @ feat/assets:
+#   - editor (precision=double, used by zone-baker)
+#   - template_release (precision=double, used by zone-server)
+# and pushes them to ghcr.io. One repo, one Dockerfile, two matrix jobs —
+# replaces the duplicated build-godot-binary.yml / build-godot-zone-binary.yml
+# that previously lived in each consumer repo.
+#
+# Triggers:
+#   - workflow_dispatch (manual)
+#   - schedule, weekly Monday 02:00 UTC (catches engine changes)
+#   - repository_dispatch event `engine-updated` from the godot engine repo
+#     (optional; lets the engine repo notify on push to feat/assets)
+
+on:
+  workflow_dispatch:
+    inputs:
+      godot_ref:
+        description: "git ref of v-sekai-multiplayer-fabric/godot to build (default: feat/assets)"
+        required: false
+        default: feat/assets
+        type: string
+  schedule:
+    - cron: "0 2 * * 1"
+  repository_dispatch:
+    types: [engine-updated]
+
+concurrency:
+  group: build-${{ github.ref }}-${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref || 'feat/assets' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360   # engine compile is ~1h on free runner; matrix doubles wall time
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: editor
+            image: ghcr.io/v-sekai-multiplayer-fabric/godot-editor-double
+            target: editor
+            binary: godot.linuxbsd.editor.double.x86_64
+          - name: runtime
+            image: ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime
+            target: template_release
+            binary: godot.linuxbsd.template_release.double.x86_64
+
+    steps:
+      - name: Checkout this repo (Dockerfile + workflow)
+        uses: actions/checkout@v4
+
+      - name: Resolve godot ref
+        id: godot
+        run: |
+          GODOT_REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref || 'feat/assets' }}"
+          echo "ref=${GODOT_REF}" >> "$GITHUB_OUTPUT"
+          echo "Will build from v-sekai-multiplayer-fabric/godot@${GODOT_REF}"
+
+      - name: Checkout godot engine source
+        uses: actions/checkout@v4
+        with:
+          repository: v-sekai-multiplayer-fabric/godot
+          ref: ${{ steps.godot.outputs.ref }}
+          path: godot-src
+          fetch-depth: 1
+
+      - name: Get engine commit SHA
+        id: sha
+        run: echo "sha=$(git -C godot-src rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          build-contexts: |
+            godot-src=godot-src
+          build-args: |
+            TARGET=${{ matrix.target }}
+            BINARY_NAME=${{ matrix.binary }}
+          push: true
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ steps.sha.outputs.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
