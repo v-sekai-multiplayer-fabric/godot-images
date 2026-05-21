@@ -1,10 +1,23 @@
 # Build recipes for v-sekai-multiplayer-fabric/godot — cross-compile from
-# Linux to every supported platform, or build natively where simpler. CI
-# (.github/workflows/build.yml) and local developers both call into the
-# same recipes so the build is reproducible outside of CI.
+# Linux to every supported platform, or build natively where simpler.
+# Local-first: there's no CI workflow; developers run these recipes on
+# their own machine and (for the editor + runtime Docker images) push the
+# results to ghcr.io with `just push-docker`.
 #
-# Engine source is expected at ./godot (override with GODOT_DIR).
-# Pinned engine tag lives in the workflow env (GODOT_PINNED_REF).
+# Engine source is cloned into ./godot at the pinned tag below; override
+# the directory with $GODOT_DIR or the ref with `just fetch-godot <ref>`.
+
+# ─── Pinned engine ref ─────────────────────────────────────────────────
+# Bump when a new tag from
+# https://github.com/v-sekai-multiplayer-fabric/godot/tags should
+# propagate downstream. `just fetch-godot` clones at this ref.
+export GODOT_PINNED_REF := "v2026.05.21.0106-multiplayer-fabric"
+export GODOT_REPO := "https://github.com/v-sekai-multiplayer-fabric/godot.git"
+
+# ─── ghcr.io image names ───────────────────────────────────────────────
+# Matches the FROM lines in the consumer repos (zone-baker, zone-server).
+export DOCKER_EDITOR_IMAGE := "ghcr.io/v-sekai-multiplayer-fabric/godot-editor-double"
+export DOCKER_RUNTIME_IMAGE := "ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime"
 
 export OPERATING_SYSTEM := os()
 export WORLD_PWD := invocation_directory()
@@ -24,6 +37,22 @@ export MINGW_PREFIX := WORLD_PWD + "/mingw"
 
 default:
     @just --list
+
+# ── Engine source ────────────────────────────────────────────────────────
+
+# Clone (or update) the godot fork at the pinned tag.
+# Override the ref with `just fetch-godot <ref>`.
+fetch-godot ref=GODOT_PINNED_REF:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "${WORLD_PWD}"
+    if [ ! -d "${GODOT_DIR}/.git" ]; then
+        git clone --filter=blob:none "${GODOT_REPO}" "${GODOT_DIR}"
+    fi
+    cd "${GODOT_DIR}"
+    git fetch --tags origin
+    git checkout --detach "{{ref}}"
+    git rev-parse --short HEAD
 
 # ── Toolchain setup ──────────────────────────────────────────────────────
 
@@ -359,3 +388,47 @@ is-github-actions:
     else
       echo "false"
     fi
+
+# ── Docker images (consumed FROM by zone-baker / zone-server) ─────────
+# The Dockerfile parameterises the engine binary via build-args. These
+# recipes wire up `docker buildx` against the local godot/ checkout. Run
+# `just fetch-godot` first; the build-context flag points buildx at the
+# checkout without copying it into a tarball context.
+
+# Build the Linux x86_64 editor image (used by zone-baker).
+build-docker-editor tag="latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "${WORLD_PWD}"
+    docker buildx build \
+        --build-arg TARGET=editor \
+        --build-arg BINARY_NAME=godot.linuxbsd.editor.double.x86_64 \
+        --build-context "godot-src=${WORLD_PWD}/${GODOT_DIR}" \
+        --tag "${DOCKER_EDITOR_IMAGE}:{{tag}}" \
+        --load \
+        --file Dockerfile \
+        .
+
+# Build the Linux x86_64 template_release runtime image (used by zone-server).
+build-docker-runtime tag="latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "${WORLD_PWD}"
+    docker buildx build \
+        --build-arg TARGET=template_release \
+        --build-arg BINARY_NAME=godot.linuxbsd.template_release.double.x86_64 \
+        --build-context "godot-src=${WORLD_PWD}/${GODOT_DIR}" \
+        --tag "${DOCKER_RUNTIME_IMAGE}:{{tag}}" \
+        --load \
+        --file Dockerfile \
+        .
+
+# Build both consumer-facing Docker images.
+build-docker tag="latest":
+    just build-docker-editor {{tag}}
+    just build-docker-runtime {{tag}}
+
+# Push both images to ghcr.io. Run `docker login ghcr.io -u <user>` first.
+push-docker tag="latest":
+    docker push "${DOCKER_EDITOR_IMAGE}:{{tag}}"
+    docker push "${DOCKER_RUNTIME_IMAGE}:{{tag}}"
