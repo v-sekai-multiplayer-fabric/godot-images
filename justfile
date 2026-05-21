@@ -433,16 +433,23 @@ is-github-actions:
 # `just fetch-godot` first; the build-context flag points buildx at the
 # checkout without copying it into a tarball context.
 
-# Forward sccache S3 credentials (Tigris) into the build if the host has
-# them in the environment — source ~/.sccache-tigris.env first to enable.
+# Forward non-sensitive sccache backend config (Tigris bucket /
+# endpoint / region) as build-args; AWS creds are passed via BuildKit
+# `--secret` mounts on the RUN line and never bake into a layer.
+# Source ~/.sccache-tigris.env first to populate these env vars.
 _sccache_buildargs := \
     if env_var_or_default("SCCACHE_BUCKET", "") == "" { "" } \
     else { \
         "--build-arg SCCACHE_BUCKET=" + env_var("SCCACHE_BUCKET") + " " + \
         "--build-arg SCCACHE_ENDPOINT=" + env_var_or_default("SCCACHE_ENDPOINT", "") + " " + \
-        "--build-arg SCCACHE_REGION=" + env_var_or_default("SCCACHE_REGION", "auto") + " " + \
-        "--build-arg AWS_ACCESS_KEY_ID=" + env_var_or_default("AWS_ACCESS_KEY_ID", "") + " " + \
-        "--build-arg AWS_SECRET_ACCESS_KEY=" + env_var_or_default("AWS_SECRET_ACCESS_KEY", "") \
+        "--build-arg SCCACHE_REGION=" + env_var_or_default("SCCACHE_REGION", "auto") \
+    }
+
+_sccache_secretargs := \
+    if env_var_or_default("AWS_ACCESS_KEY_ID", "") == "" { "" } \
+    else { \
+        "--secret id=aws_access_key_id,env=AWS_ACCESS_KEY_ID " + \
+        "--secret id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY" \
     }
 
 # Build the Linux x86_64 editor image (used by zone-baker).
@@ -454,6 +461,7 @@ build-docker-editor tag="latest":
         --build-arg TARGET=editor \
         --build-arg BINARY_NAME=godot.linuxbsd.editor.double.x86_64 \
         {{_sccache_buildargs}} \
+        {{_sccache_secretargs}} \
         --build-context "godot-src=${WORLD_PWD}/${GODOT_DIR}" \
         --tag "${DOCKER_EDITOR_IMAGE}:{{tag}}" \
         --load \
@@ -469,6 +477,7 @@ build-docker-runtime tag="latest":
         --build-arg TARGET=template_release \
         --build-arg BINARY_NAME=godot.linuxbsd.template_release.double.x86_64 \
         {{_sccache_buildargs}} \
+        {{_sccache_secretargs}} \
         --build-context "godot-src=${WORLD_PWD}/${GODOT_DIR}" \
         --tag "${DOCKER_RUNTIME_IMAGE}:{{tag}}" \
         --load \

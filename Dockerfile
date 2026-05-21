@@ -41,7 +41,7 @@ RUN dnf install -y 'dnf-command(config-manager)' && \
         libXi-devel mesa-libGL-devel \
         alsa-lib-devel pulseaudio-libs-devel \
         libstdc++-static \
-        ca-certificates curl tar && \
+        ca-certificates && \
     dnf clean all && \
     pip3 install scons
 
@@ -58,40 +58,47 @@ ENV SCCACHE_CACHE_SIZE=20G
 # the editor and runtime builds (both unpack /build but the actual
 # compiler invocations reference absolute paths).
 ENV SCCACHE_BASEDIRS=/build
-# Optional Tigris/S3 shared backend. Forwarded as build-args by the
-# justfile when the host has the env vars set (see ~/.sccache-tigris.env).
-# When SCCACHE_BUCKET is non-empty, sccache uses S3 instead of the local
-# buildx cache mount, so entries persist in Tigris across CI runs and
-# developer machines. Empty values keep the local-disk fallback.
+# Non-sensitive sccache backend configuration travels as build-args.
+# The actual AWS credentials come in via BuildKit `--secret` mounts on
+# the RUN line below (see justfile `_sccache_secretargs` and the CI
+# workflow) so they never bake into image layers.
 ARG SCCACHE_BUCKET=""
 ARG SCCACHE_ENDPOINT=""
 ARG SCCACHE_REGION=""
-ARG AWS_ACCESS_KEY_ID=""
-ARG AWS_SECRET_ACCESS_KEY=""
 ENV SCCACHE_BUCKET=${SCCACHE_BUCKET}
 ENV SCCACHE_ENDPOINT=${SCCACHE_ENDPOINT}
 ENV SCCACHE_REGION=${SCCACHE_REGION}
-ENV AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-ENV AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
 
 WORKDIR /build
 COPY --from=godot-src . .
 
 # SConstruct lives at the engine root in the v-sekai-multiplayer-fabric/godot
 # layout (no nested godot/ subdir, unlike multiplayer-fabric-build).
+# AWS_* envs are sourced from BuildKit secret files at /run/secrets/* —
+# they're only present for the duration of this RUN and never persist
+# into a layer. If the secrets are absent (no Tigris configured),
+# sccache silently falls back to the local buildx cache mount.
 RUN --mount=type=cache,target=/root/.cache/scons-godot,sharing=locked \
     --mount=type=cache,target=/root/.cache/sccache,sharing=locked \
-    scons platform=linuxbsd \
-        target="${TARGET}" \
-        precision=double \
-        accesskit=no \
-        linuxbsd_speechd=no \
-        cache_path=/root/.cache/scons-godot \
-        c_compiler_launcher=sccache \
-        cpp_compiler_launcher=sccache \
-        -j"$(nproc)" \
-    && sccache --show-stats \
-    && strip "bin/${BINARY_NAME}"
+    --mount=type=secret,id=aws_access_key_id \
+    --mount=type=secret,id=aws_secret_access_key \
+    sh -eu -c '\
+        if [ -s /run/secrets/aws_access_key_id ]; then \
+            export AWS_ACCESS_KEY_ID="$(cat /run/secrets/aws_access_key_id)"; \
+            export AWS_SECRET_ACCESS_KEY="$(cat /run/secrets/aws_secret_access_key)"; \
+        fi; \
+        scons platform=linuxbsd \
+            target="${TARGET}" \
+            precision=double \
+            accesskit=no \
+            linuxbsd_speechd=no \
+            cache_path=/root/.cache/scons-godot \
+            c_compiler_launcher=sccache \
+            cpp_compiler_launcher=sccache \
+            -j"$(nproc)" && \
+        sccache --show-stats && \
+        strip "bin/${BINARY_NAME}" \
+    '
 
 # ── Runtime stage: just the binary + minimal shared libs ─────────────────────
 FROM almalinux:9
