@@ -43,16 +43,34 @@ default: fetch-godot build-docker
 
 # Clone (or update) the godot fork at the pinned tag.
 # Override the ref with `just fetch-godot <ref>`.
+#
+# Uses --depth=1 --branch <ref> --single-branch so only the tree at one
+# tag is fetched (one packfile, no commit history, no demand-loading of
+# blobs). Much faster than `git clone --filter=blob:none` + checkout for
+# a single-tag build because there's only one round-trip and the
+# checkout reads from the local packfile instead of issuing per-blob
+# lazy fetches against the remote.
 fetch-godot ref=GODOT_PINNED_REF:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "${WORLD_PWD}"
-    if [ ! -d "${GODOT_DIR}/.git" ]; then
-        git clone --filter=blob:none "${GODOT_REPO}" "${GODOT_DIR}"
+    if [ -d "${GODOT_DIR}/.git" ]; then
+        cd "${GODOT_DIR}"
+        # Already cloned. Only hit the network if the ref isn't local.
+        if git rev-parse --verify "{{ref}}" >/dev/null 2>&1; then
+            git checkout --detach "{{ref}}"
+        else
+            # Shallow-fetch just this ref into the existing repo. Try as
+            # a tag first; fall back to a branch ref name.
+            git fetch --depth=1 origin "refs/tags/{{ref}}:refs/tags/{{ref}}" 2>/dev/null \
+                || git fetch --depth=1 origin "{{ref}}"
+            git checkout --detach FETCH_HEAD
+        fi
+    else
+        git clone --depth=1 --branch "{{ref}}" --single-branch \
+            "${GODOT_REPO}" "${GODOT_DIR}"
+        cd "${GODOT_DIR}"
     fi
-    cd "${GODOT_DIR}"
-    git fetch --tags origin
-    git checkout --detach "{{ref}}"
     git rev-parse --short HEAD
 
 # ── Toolchain setup ──────────────────────────────────────────────────────
