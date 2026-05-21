@@ -1,2 +1,37 @@
+# OS / editor scratch
 .DS_Store
 *.swp
+.idea/
+.vscode/
+
+# Engine source clone (populated by `just fetch-godot`)
+/godot/
+# Honour the GODOT_DIR override too if someone points it elsewhere in-tree.
+
+# Toolchain caches populated by setup-*/fetch-* recipes
+/osxcross/
+/mingw/
+/vulkan_sdk/
+/emsdk/
+/android_sdk/
+/jdk/
+/aarch64-godot-linux-gnu_sdk-buildroot/
+/cmdline-tools/
+
+# SCons object cache (also created under godot/, but cover the repo root
+# in case GODOT_DIR=. or someone runs scons by hand)
+.scons_cache/
+/.sconsign.dblite
+
+# Build outputs from build-platform-target / package-tpz
+/editors/
+/tpz/
+/tpz_temp/
+*.tpz
+
+# Transient downloads
+/llvm-mingw.tar.xz
+/jdk.tar.gz
+/vulkan-sdk.zip
+/aarch64-godot-linux-gnu_sdk-buildroot.tar.bz2
+/commandlinetools-linux-*.zip
