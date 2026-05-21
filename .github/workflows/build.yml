@@ -1,25 +1,34 @@
 name: build
 
-# Builds both engine flavours from v-sekai-multiplayer-fabric/godot @ feat/assets:
-#   - editor (precision=double, used by zone-baker)
-#   - template_release (precision=double, used by zone-server)
-# and pushes them to ghcr.io. One repo, one Dockerfile, two matrix jobs —
-# replaces the duplicated build-godot-binary.yml / build-godot-zone-binary.yml
-# that previously lived in each consumer repo.
+# Builds engine artifacts from a pinned tag of
+# v-sekai-multiplayer-fabric/godot (no submodule / git-subrepo — the source
+# is fetched fresh on every run via actions/checkout against a release tag
+# listed at https://github.com/v-sekai-multiplayer-fabric/godot/tags).
+#
+# Two output families:
+#
+#   1. Docker images pushed to ghcr.io — consumed FROM by zone-baker /
+#      zone-server (Linux x86_64 editor + runtime).
+#
+#   2. Player export templates uploaded as workflow artifacts — the
+#      template_release binary for each desktop platform/arch:
+#        linux-x86_64, linux-arm64, windows-x86_64, windows-arm64,
+#        macos-universal (arm64 + x86_64 lipo'd).
+#      This is wider than V-Sekai-fire/multiplayer-fabric-build, which
+#      ships only linux-x86_64 / windows-x86_64 / macos-arm64+x86_64.
 #
 # Triggers:
-#   - workflow_dispatch (manual)
+#   - workflow_dispatch (manual; can override the pinned godot tag)
 #   - schedule, weekly Monday 02:00 UTC (catches engine changes)
-#   - repository_dispatch event `engine-updated` from the godot engine repo
-#     (optional; lets the engine repo notify on push to feat/assets)
+#   - repository_dispatch event `engine-updated` (fan-out from engine repo)
 
 on:
   workflow_dispatch:
     inputs:
       godot_ref:
-        description: "git ref of v-sekai-multiplayer-fabric/godot to build (default: feat/assets)"
+        description: "git ref of v-sekai-multiplayer-fabric/godot to build (default: pinned tag below)"
         required: false
-        default: feat/assets
+        default: ""
         type: string
   schedule:
     - cron: "0 2 * * 1"
@@ -27,17 +36,40 @@ on:
     types: [engine-updated]
 
 concurrency:
-  group: build-${{ github.ref }}-${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref || 'feat/assets' }}
+  group: build-${{ github.ref }}-${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref || 'pinned' }}
   cancel-in-progress: false
 
 permissions:
   contents: read
   packages: write
 
+env:
+  # ─── Pinned engine tag ─────────────────────────────────────────────────
+  # Update this when a new release on
+  # https://github.com/v-sekai-multiplayer-fabric/godot/tags should
+  # propagate to downstream consumers. Workflow inputs / repository_dispatch
+  # payloads override it for ad-hoc test builds.
+  GODOT_PINNED_REF: v2026.05.21.0007-multiplayer-fabric
+
 jobs:
-  build:
+  resolve:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # engine compile is ~1h on free runner; matrix doubles wall time
+    outputs:
+      ref: ${{ steps.r.outputs.ref }}
+    steps:
+      - id: r
+        run: |
+          REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref || env.GODOT_PINNED_REF }}"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "Building v-sekai-multiplayer-fabric/godot@${REF}"
+
+  # ─── Linux Docker images (editor + runtime) ───────────────────────────
+  # The same images consumers FROM today — kept on the existing matrix so
+  # zone-baker / zone-server are unaffected by the new template jobs below.
+  build-docker:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -55,18 +87,11 @@ jobs:
       - name: Checkout this repo (Dockerfile + workflow)
         uses: actions/checkout@v4
 
-      - name: Resolve godot ref
-        id: godot
-        run: |
-          GODOT_REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref || 'feat/assets' }}"
-          echo "ref=${GODOT_REF}" >> "$GITHUB_OUTPUT"
-          echo "Will build from v-sekai-multiplayer-fabric/godot@${GODOT_REF}"
-
       - name: Checkout godot engine source
         uses: actions/checkout@v4
         with:
           repository: v-sekai-multiplayer-fabric/godot
-          ref: ${{ steps.godot.outputs.ref }}
+          ref: ${{ needs.resolve.outputs.ref }}
           path: godot-src
           fetch-depth: 1
 
@@ -84,6 +109,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Sanitize ref for OCI tag
+        id: tag
+        run: |
+          SAFE=$(echo "${{ needs.resolve.outputs.ref }}" | tr '/' '-')
+          echo "safe=${SAFE}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@v6
         with:
@@ -97,6 +128,128 @@ jobs:
           push: true
           tags: |
             ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ steps.tag.outputs.safe }}
             ${{ matrix.image }}:${{ steps.sha.outputs.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # ─── Player export templates (template_release) ───────────────────────
+  # Wider arch coverage than V-Sekai-fire/multiplayer-fabric-build: adds
+  # linux-arm64 and windows-arm64 on top of the standard x86_64 desktop
+  # builds plus a macOS universal binary.
+  build-template:
+    needs: resolve
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            platform: linuxbsd
+            arch: x86_64
+            scons_extra: "accesskit=no linuxbsd_speechd=no"
+            binary: godot.linuxbsd.template_release.double.x86_64
+            artifact_ext: ""
+          - name: linux-arm64
+            os: ubuntu-22.04-arm
+            platform: linuxbsd
+            arch: arm64
+            scons_extra: "accesskit=no linuxbsd_speechd=no"
+            binary: godot.linuxbsd.template_release.double.arm64
+            artifact_ext: ""
+          - name: windows-x86_64
+            os: windows-latest
+            platform: windows
+            arch: x86_64
+            scons_extra: "d3d12=no"
+            binary: godot.windows.template_release.double.x86_64.exe
+            artifact_ext: ".exe"
+          - name: windows-arm64
+            os: windows-11-arm
+            platform: windows
+            arch: arm64
+            scons_extra: "d3d12=no"
+            binary: godot.windows.template_release.double.arm64.exe
+            artifact_ext: ".exe"
+          - name: macos-universal
+            os: macos-14
+            platform: macos
+            arch: universal
+            scons_extra: "vulkan=no"
+            binary: godot.macos.template_release.double.universal
+            artifact_ext: ""
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout godot engine source
+        uses: actions/checkout@v4
+        with:
+          repository: v-sekai-multiplayer-fabric/godot
+          ref: ${{ needs.resolve.outputs.ref }}
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install SCons
+        shell: bash
+        run: python -m pip install --upgrade scons
+
+      - name: Install Linux build deps
+        if: matrix.platform == 'linuxbsd'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libx11-dev libxcursor-dev libxinerama-dev \
+            libxi-dev libxrandr-dev libgl1-mesa-dev \
+            libwayland-dev \
+            libasound2-dev libpulse-dev libudev-dev \
+            libstdc++-12-dev
+
+      - name: Cache SCons cache
+        uses: actions/cache@v4
+        with:
+          path: .scons_cache
+          key: scons-${{ matrix.name }}-${{ needs.resolve.outputs.ref }}-${{ github.sha }}
+          restore-keys: |
+            scons-${{ matrix.name }}-${{ needs.resolve.outputs.ref }}-
+            scons-${{ matrix.name }}-
+
+      - name: Build template_release
+        shell: bash
+        env:
+          SCONS_CACHE: ${{ github.workspace }}/.scons_cache
+        run: |
+          JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2)
+          scons \
+            platform=${{ matrix.platform }} \
+            arch=${{ matrix.arch }} \
+            target=template_release \
+            precision=double \
+            ${{ matrix.scons_extra }} \
+            cache_path="${SCONS_CACHE}" \
+            -j"${JOBS}"
+
+      - name: Strip binary (non-Windows)
+        if: matrix.platform != 'windows'
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            # On macOS, strip the universal binary in-place; the .app bundle
+            # (if generated) references the same binary.
+            strip -x "bin/${{ matrix.binary }}" || true
+          else
+            strip "bin/${{ matrix.binary }}" || true
+          fi
+
+      - name: Upload template binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-template-${{ matrix.name }}-${{ needs.resolve.outputs.ref }}
+          path: bin/${{ matrix.binary }}
+          if-no-files-found: error
+          retention-days: 30
