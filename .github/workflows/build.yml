@@ -49,7 +49,7 @@ env:
   # https://github.com/v-sekai-multiplayer-fabric/godot/tags should
   # propagate to downstream consumers. Workflow inputs / repository_dispatch
   # payloads override it for ad-hoc test builds.
-  GODOT_PINNED_REF: v2026.05.21.0007-multiplayer-fabric
+  GODOT_PINNED_REF: v2026.05.21.0106-multiplayer-fabric
 
 jobs:
   resolve:
@@ -134,7 +134,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   # ─── Player export templates (template_release) ───────────────────────
-  # Wider arch coverage than V-Sekai-fire/multiplayer-fabric-build: adds
+  # Native-runner builds dispatched through the repo justfile so the same
+  # recipe (`just build-platform-target <platform> template_release <arch>
+  # double`) is reproducible by a developer on their own machine. Wider
+  # arch coverage than V-Sekai-fire/multiplayer-fabric-build: adds
   # linux-arm64 and windows-arm64 on top of the standard x86_64 desktop
   # builds plus a macOS universal binary.
   build-template:
@@ -148,46 +151,46 @@ jobs:
             os: ubuntu-latest
             platform: linuxbsd
             arch: x86_64
-            scons_extra: "accesskit=no linuxbsd_speechd=no"
             binary: godot.linuxbsd.template_release.double.x86_64
-            artifact_ext: ""
           - name: linux-arm64
             os: ubuntu-22.04-arm
             platform: linuxbsd
             arch: arm64
-            scons_extra: "accesskit=no linuxbsd_speechd=no"
             binary: godot.linuxbsd.template_release.double.arm64
-            artifact_ext: ""
           - name: windows-x86_64
             os: windows-latest
             platform: windows
             arch: x86_64
-            scons_extra: "d3d12=no"
             binary: godot.windows.template_release.double.x86_64.exe
-            artifact_ext: ".exe"
           - name: windows-arm64
             os: windows-11-arm
             platform: windows
             arch: arm64
-            scons_extra: "d3d12=no"
             binary: godot.windows.template_release.double.arm64.exe
-            artifact_ext: ".exe"
           - name: macos-universal
             os: macos-14
             platform: macos
             arch: universal
-            scons_extra: "vulkan=no"
             binary: godot.macos.template_release.double.universal
-            artifact_ext: ""
 
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Checkout this repo (justfile)
+        uses: actions/checkout@v4
+
       - name: Checkout godot engine source
         uses: actions/checkout@v4
         with:
           repository: v-sekai-multiplayer-fabric/godot
           ref: ${{ needs.resolve.outputs.ref }}
+          path: godot
           fetch-depth: 1
+
+      - name: Set up just
+        uses: extractions/setup-just@v3
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -195,7 +198,6 @@ jobs:
           python-version: "3.x"
 
       - name: Install SCons
-        shell: bash
         run: python -m pip install --upgrade scons
 
       - name: Install Linux build deps
@@ -213,43 +215,24 @@ jobs:
       - name: Cache SCons cache
         uses: actions/cache@v4
         with:
-          path: .scons_cache
+          path: godot/.scons_cache
           key: scons-${{ matrix.name }}-${{ needs.resolve.outputs.ref }}-${{ github.sha }}
           restore-keys: |
             scons-${{ matrix.name }}-${{ needs.resolve.outputs.ref }}-
             scons-${{ matrix.name }}-
 
-      - name: Build template_release
-        shell: bash
+      - name: Build template_release via justfile
         env:
-          SCONS_CACHE: ${{ github.workspace }}/.scons_cache
+          # Use native MSVC on Windows runners; llvm-mingw is for Linux
+          # cross-compile of the same recipe.
+          USE_MINGW: ${{ matrix.platform == 'windows' && 'no' || 'yes' }}
         run: |
-          JOBS=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 2)
-          scons \
-            platform=${{ matrix.platform }} \
-            arch=${{ matrix.arch }} \
-            target=template_release \
-            precision=double \
-            ${{ matrix.scons_extra }} \
-            cache_path="${SCONS_CACHE}" \
-            -j"${JOBS}"
-
-      - name: Strip binary (non-Windows)
-        if: matrix.platform != 'windows'
-        shell: bash
-        run: |
-          if [ "${{ matrix.platform }}" = "macos" ]; then
-            # On macOS, strip the universal binary in-place; the .app bundle
-            # (if generated) references the same binary.
-            strip -x "bin/${{ matrix.binary }}" || true
-          else
-            strip "bin/${{ matrix.binary }}" || true
-          fi
+          just build-platform-target ${{ matrix.platform }} template_release ${{ matrix.arch }} double yes
 
       - name: Upload template binary
         uses: actions/upload-artifact@v4
         with:
           name: godot-template-${{ matrix.name }}-${{ needs.resolve.outputs.ref }}
-          path: bin/${{ matrix.binary }}
+          path: godot/bin/${{ matrix.binary }}
           if-no-files-found: error
           retention-days: 30

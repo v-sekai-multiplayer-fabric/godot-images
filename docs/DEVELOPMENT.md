@@ -88,11 +88,58 @@ and `docker/godot-zone/` Dockerfiles that used to live in each consumer
 
 ```
 Dockerfile             parameterised by TARGET + BINARY_NAME build-args
+justfile               build recipes (cross-compile setup + scons dispatch
+                       per platform). CI and local developers call the
+                       same recipes — see "Building locally" below.
 .github/workflows/
   build.yml            two matrices:
                          build-docker   {editor, runtime} → ghcr.io
                          build-template {linux,windows × x86_64,arm64; macos universal} → artifacts
 ```
+
+## Building locally
+
+All build flags live in `justfile`. The CI workflow uses native runners
+for each desktop platform, but the same recipes also work cross-compiled
+from a single Linux host (the multiplayer-fabric-build style), so engineers
+can build any platform from one workstation.
+
+```sh
+# clone engine source side-by-side
+git clone https://github.com/v-sekai-multiplayer-fabric/godot.git godot
+git -C godot checkout v2026.05.21.0106-multiplayer-fabric  # or whatever GODOT_PINNED_REF is
+
+# native build on your host
+just install_packages                                       # Linux deps
+just build-platform-target linuxbsd template_release x86_64 double
+
+# windows from Linux via llvm-mingw
+just install_packages
+just fetch-llvm-mingw
+just setup-d3d12
+just build-platform-target windows template_release x86_64 double
+
+# windows on a native Windows host (MSVC)
+USE_MINGW=no just build-platform-target windows template_release x86_64 double
+
+# macos / ios from Linux via osxcross
+just build-osxcross
+just fetch-vulkan-sdk
+just build-platform-target macos template_release universal double
+just build-platform-target ios   template_release arm64     double
+
+# android / web also covered
+just fetch-openjdk && just setup-android-sdk
+just build-platform-target android template_release arm64 double
+
+just setup-emscripten
+just build-platform-target web template_release wasm32 double
+```
+
+Binaries land in `godot/bin/`. The recipe also copies into `editors/` (for
+`target=editor`) or `tpz/` (for `target=template_*`) at the repo root, and
+`just package-tpz tpz <name> godot/version.py double` zips them into a
+Godot-loadable `.tpz` template pack.
 
 ## Cache + retention
 
