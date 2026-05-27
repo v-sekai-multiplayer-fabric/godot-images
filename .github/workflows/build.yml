@@ -82,6 +82,8 @@ jobs:
             target: editor
           - name: windows-template-release
             target: template_release
+    env:
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
