@@ -67,9 +67,12 @@ fetch-godot ref=GODOT_PINNED_REF:
             git checkout --detach "$(git rev-parse FETCH_HEAD^{commit})"
         fi
     else
-        git clone --depth=1 --branch "{{ref}}" --single-branch \
+        git clone --depth=1 --single-branch \
             "${GODOT_REPO}" "${GODOT_DIR}"
         cd "${GODOT_DIR}"
+        git fetch --depth=1 origin "refs/tags/{{ref}}:refs/tags/{{ref}}" 2>/dev/null \
+            || git fetch --depth=1 origin "{{ref}}"
+        git checkout --detach "$(git rev-parse "FETCH_HEAD^{commit}" 2>/dev/null || git rev-parse FETCH_HEAD)"
     fi
     git rev-parse --short HEAD
 
