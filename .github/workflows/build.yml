@@ -1,17 +1,5 @@
 name: build
 
-# Build the ghcr.io editor + runtime images on demand, sharing sccache
-# storage with developer machines via a Tigris S3 bucket
-# (provisioned with `fly storage create --name godot-images-sccache`).
-# Secrets are set on this repo — see docs/DEVELOPMENT.md for the local
-# equivalent (`source ~/.sccache-tigris.env`).
-#
-# Triggers (mirrors the local-first ethos — manual + scheduled only, so
-# the engine compile doesn't fire on doc tweaks):
-#   - workflow_dispatch (manual; can override the pinned godot tag)
-#   - schedule, weekly Monday 02:00 UTC (catches engine drift)
-#   - repository_dispatch event `engine-updated` from the engine repo
-
 on:
   workflow_dispatch:
     inputs:
@@ -26,7 +14,7 @@ on:
     types: [engine-updated]
 
 concurrency:
-  group: build-${{ github.ref }}-${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref || 'pinned' }}
+  group: "build-${{ github.ref }}-${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref || 'pinned' }}"
   cancel-in-progress: false
 
 permissions:
@@ -47,56 +35,85 @@ jobs:
           - name: runtime
             recipe: build-docker-runtime
             image: ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime
-
     env:
-      # Mirror the env that ~/.sccache-tigris.env sets locally. With these
-      # exported, the justfile's _sccache_buildargs expression forwards
-      # them into `docker buildx build --build-arg ...` so the in-Docker
-      # sccache compiles against the shared Tigris bucket.
-      SCCACHE_BUCKET: ${{ secrets.SCCACHE_BUCKET }}
-      SCCACHE_ENDPOINT: ${{ secrets.SCCACHE_ENDPOINT }}
-      SCCACHE_REGION: ${{ secrets.SCCACHE_REGION }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
+      SCCACHE_BUCKET: "${{ secrets.SCCACHE_BUCKET }}"
+      SCCACHE_ENDPOINT: "${{ secrets.SCCACHE_ENDPOINT }}"
+      SCCACHE_REGION: "${{ secrets.SCCACHE_REGION }}"
+      AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+      AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
-
       - name: Set up just
         uses: extractions/setup-just@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
+          username: "${{ github.actor }}"
+          password: "${{ secrets.GITHUB_TOKEN }}"
       - name: Fetch godot source
         run: |
           REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
-          if [ -n "${REF}" ]; then
-            just fetch-godot "${REF}"
-          else
-            just fetch-godot
-          fi
-
+          if [ -n "${REF}" ]; then just fetch-godot "${REF}"; else just fetch-godot; fi
       - name: Resolve engine SHA
         id: sha
         run: echo "sha=$(git -C godot rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
       - name: Build image via just
-        run: just ${{ matrix.recipe }} latest
-
+        run: "just ${{ matrix.recipe }} latest"
       - name: Tag with engine SHA
         run: |
           docker tag "${{ matrix.image }}:latest" "${{ matrix.image }}:${{ steps.sha.outputs.sha }}"
-
       - name: Push image
         run: |
           docker push "${{ matrix.image }}:latest"
           docker push "${{ matrix.image }}:${{ steps.sha.outputs.sha }}"
+
+  build-windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-editor
+            target: editor
+          - name: windows-template-release
+            target: template_release
+    env:
+      SCCACHE_BUCKET: "${{ secrets.SCCACHE_BUCKET }}"
+      SCCACHE_ENDPOINT: "${{ secrets.SCCACHE_ENDPOINT }}"
+      SCCACHE_REGION: "${{ secrets.SCCACHE_REGION }}"
+      AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
+      AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+      - name: Set up just
+        uses: extractions/setup-just@v3
+      - name: Install build dependencies
+        run: just install_packages
+      - name: Fetch llvm-mingw toolchain
+        run: just fetch-llvm-mingw
+      - name: Set up D3D12 SDK
+        run: just setup-d3d12
+      - name: Fetch godot source
+        run: |
+          REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
+          if [ -n "${REF}" ]; then just fetch-godot "${REF}"; else just fetch-godot; fi
+      - name: Resolve engine SHA
+        id: sha
+        run: echo "sha=$(git -C godot rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: "just build-platform-target windows ${{ matrix.target }}"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.name }}-${{ steps.sha.outputs.sha }}"
+          path: |
+            editors/
+            tpz/
+          if-no-files-found: warn
+          retention-days: 30
