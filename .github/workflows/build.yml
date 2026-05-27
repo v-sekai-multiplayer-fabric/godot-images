@@ -97,11 +97,11 @@ jobs:
         run: just install_packages
       - name: Fetch llvm-mingw toolchain
         run: just fetch-llvm-mingw
-      - name: Set up D3D12 SDK
-        run: just setup-d3d12
       - name: Fetch godot source
         run: |
           REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
+      - name: Set up D3D12 SDK
+        run: just setup-d3d12
           if [ -n "${REF}" ]; then just fetch-godot "${REF}"; else just fetch-godot; fi
       - name: Resolve engine SHA
         id: sha
