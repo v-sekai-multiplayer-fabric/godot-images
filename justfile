@@ -11,7 +11,7 @@
 # Bump when a new tag from
 # https://github.com/v-sekai-multiplayer-fabric/godot/tags should
 # propagate downstream. `just fetch-godot` clones at this ref.
-export GODOT_PINNED_REF := "v2026.05.27.1639-multiplayer-fabric"
+export GODOT_PINNED_REF := "v2026.05.27.2123-multiplayer-fabric"
 export GODOT_REPO := "https://github.com/v-sekai-multiplayer-fabric/godot.git"
 
 # ─── ghcr.io image names ───────────────────────────────────────────────
@@ -58,13 +58,13 @@ fetch-godot ref=GODOT_PINNED_REF:
         cd "${GODOT_DIR}"
         # Already cloned. Only hit the network if the ref isn't local.
         if git rev-parse --verify "{{ref}}" >/dev/null 2>&1; then
-            git checkout --detach "{{ref}}"
+            git checkout --detach "$(git rev-parse "{{ref}}^{commit}" 2>/dev/null || echo "{{ref}}")"
         else
             # Shallow-fetch just this ref into the existing repo. Try as
             # a tag first; fall back to a branch ref name.
             git fetch --depth=1 origin "refs/tags/{{ref}}:refs/tags/{{ref}}" 2>/dev/null \
                 || git fetch --depth=1 origin "{{ref}}"
-            git checkout --detach FETCH_HEAD
+            git checkout --detach "$(git rev-parse FETCH_HEAD^{commit})"
         fi
     else
         git clone --depth=1 --branch "{{ref}}" --single-branch \
