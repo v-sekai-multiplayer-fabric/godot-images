@@ -35,12 +35,6 @@ jobs:
           - name: runtime
             recipe: build-docker-runtime
             image: ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime
-    env:
-      SCCACHE_BUCKET: "${{ secrets.SCCACHE_BUCKET }}"
-      SCCACHE_ENDPOINT: "${{ secrets.SCCACHE_ENDPOINT }}"
-      SCCACHE_REGION: "${{ secrets.SCCACHE_REGION }}"
-      AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-      AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
@@ -82,12 +76,6 @@ jobs:
             target: editor
           - name: windows-template-release
             target: template_release
-    env:
-      SCCACHE_BUCKET: "${{ secrets.SCCACHE_BUCKET }}"
-      SCCACHE_ENDPOINT: "${{ secrets.SCCACHE_ENDPOINT }}"
-      SCCACHE_REGION: "${{ secrets.SCCACHE_REGION }}"
-      AWS_ACCESS_KEY_ID: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-      AWS_SECRET_ACCESS_KEY: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
     steps:
       - name: Checkout this repo
         uses: actions/checkout@v4
