@@ -1,0 +1,21 @@
+# Build the linuxbsd double-precision Godot RUNTIME (template_release) image as
+# a podman systemd Quadlet (.build) — the rootless-podman replacement for the
+# docker buildx / build-push-action path. `systemctl --user start
+# zone-godot-runtime-build` builds ghcr.io/.../zone-godot-runtime:latest; push
+# separately with `podman push` (or `just push-docker`).
+#
+# Prereq: the engine source at ../godot (run `just fetch-godot` in the repo
+# root first). The Containerfile pulls it in via the godot-src build context.
+[Unit]
+Description=Build the linuxbsd double-precision Godot runtime image
+
+[Build]
+ImageTag=ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime:latest
+SetWorkingDirectory=unit
+File=../Containerfile
+PodmanArgs=--build-context godot-src=../godot
+BuildArg=TARGET=template_release
+BuildArg=BINARY_NAME=godot.linuxbsd.template_release.double.x86_64
+
+[Install]
+WantedBy=default.target

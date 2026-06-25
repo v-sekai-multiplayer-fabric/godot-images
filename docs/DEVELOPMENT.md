@@ -34,17 +34,27 @@ Coverage is intentionally wider than
 which ships only `linux-x86_64`, `windows-x86_64`, and macOS arm64+x86_64
 on the desktop matrix.
 
-### Docker images (consumer-facing)
+### Container images (consumer-facing)
 
 `FROM`-able by [`zone-baker`](https://github.com/v-sekai-multiplayer-fabric/zone-baker)
 and [`zone-server`](https://github.com/v-sekai-multiplayer-fabric/zone-server).
-Build and push from any Linux host with Docker (or Docker Desktop):
+Built with **podman** (the fabric standardises on rootless podman + systemd
+quadlets — no Docker). From any Linux host:
 
 ```sh
 just fetch-godot
-just build-docker            # editor + runtime
-docker login ghcr.io -u <github-user>
+just build-docker            # editor + runtime (podman build)
+podman login ghcr.io -u <github-user>
 just push-docker
+```
+
+Or build via the systemd quadlets in `quadlets/` (the host/systemd path):
+
+```sh
+just fetch-godot
+cp quadlets/*.build ~/.config/containers/systemd/
+systemctl --user daemon-reload
+systemctl --user start godot-editor-double-build zone-godot-runtime-build
 ```
 
 | Image (`ghcr.io/v-sekai-multiplayer-fabric/…`) | Consumer | SCons target | Binary |
@@ -63,7 +73,7 @@ All recipes default to a hard-coded tag of
 once at the top of `justfile`:
 
 ```just
-export GODOT_PINNED_REF := "v2026.05.21.0106-multiplayer-fabric"
+export GODOT_PINNED_REF := "v2026.05.28.2155-multiplayer-fabric"
 ```
 
 To bump the engine version: edit that line and re-run `just fetch-godot`.
@@ -80,41 +90,32 @@ Triggers: `workflow_dispatch`, weekly Monday cron, and the
 `engine-updated` `repository_dispatch` event. There is intentionally no
 `push:` trigger — engine compiles are too slow to run on every doc tweak.
 
-CI uses the same justfile and Dockerfile as a local build; the only
-difference is that the workflow injects the Tigris secrets as `env:`
-which the justfile then forwards via `--build-arg` so the in-Docker
-sccache reads/writes the shared Tigris bucket. Cache entries from a
-developer's `just build-docker` accumulate in the same pool as CI runs.
+CI uses the same justfile and Containerfile as a local build. In CI the
+workflow passes `SCCACHE_GHA_ENABLED=true` as a build arg and forwards
+`ACTIONS_CACHE_URL` / `ACTIONS_RUNTIME_TOKEN` as podman build secrets so
+that sccache inside the container reads/writes the job's GitHub Actions
+cache. Local `just build-docker` runs fall back to the on-disk sccache
+cache at `~/.cache/sccache`.
 
-## sccache pool
+## sccache cache
 
-A [Tigris](https://www.tigrisdata.com/) (Fly.io) S3-compatible bucket
-named `godot-images-sccache` backs sccache for both CI and developer
-machines. Provisioned with:
+sccache caches compiler output so unchanged translation units are not
+recompiled across builds.
 
-```sh
-fly storage create --name godot-images-sccache --org personal
-```
-
-The credentials live in two places:
-
-- **CI**: as repo-level GitHub Actions secrets on this repo:
-  `SCCACHE_BUCKET`, `SCCACHE_ENDPOINT`, `SCCACHE_REGION`,
-  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`.
-- **Local**: `~/.sccache-tigris.env` (mode `0600`, never committed).
-  Source it to switch your host sccache from local-disk to the shared
-  bucket:
-
-  ```sh
-  source ~/.sccache-tigris.env
-  just                  # default = fetch-godot + build-docker
-  sccache --show-stats  # see hits / misses against Tigris
-  ```
+- **CI** (`build-docker` job): sccache runs inside the container with
+  `SCCACHE_GHA_ENABLED=true`. `ACTIONS_CACHE_URL` and
+  `ACTIONS_RUNTIME_TOKEN` are injected as podman build secrets so sccache
+  reads/writes the job's GitHub Actions cache directly. No external
+  storage account is required.
+- **CI** (`build-windows` job): sccache runs on the host runner via
+  `mozilla-actions/sccache-action` with `SCCACHE_GHA_ENABLED: "true"`.
+- **Local** (`just build-docker`): sccache falls back to the on-disk
+  cache at `~/.cache/sccache`. Run `sccache --show-stats` after a build
+  to inspect hit rates.
 
 Cache entries are keyed per-compiler (preprocessed input + flags +
-compiler hash), so the bucket simultaneously holds macOS clang, Linux
-gcc, MinGW, and Emscripten entries without collision — each platform
-pulls only the entries that match its own compiler.
+compiler hash), so Linux gcc, MinGW, and Emscripten entries coexist
+without collision — each platform pulls only its own matching entries.
 
 ## Engine compile cache layering
 
@@ -131,12 +132,17 @@ Two complementary caches back every scons invocation:
 ## Layout
 
 ```
-Dockerfile             parameterised by TARGET + BINARY_NAME build-args
+Containerfile          parameterised by TARGET + BINARY_NAME build-args
                        and the SCCACHE_* env vars; invoked by
-                       `just build-docker-{editor,runtime}`
+                       `just build-docker-{editor,runtime}` or the
+                       systemd quadlets in quadlets/
 justfile               every build recipe (cross-compile setup + scons
-                       dispatch + docker build/push); forwards sccache
-                       creds into buildx via _sccache_buildargs
+                       dispatch + podman build/push); forwards sccache
+                       creds into the build via _sccache_buildargs
+quadlets/
+  *.build              systemd Quadlet units for rootless-podman builds;
+                       copy to ~/.config/containers/systemd/ and start
+                       with `systemctl --user start <name>-build`
 .github/workflows/
   build.yml            manual + weekly CI that calls `just build-docker-*`
                        with the same justfile, secrets injected as env

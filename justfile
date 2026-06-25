@@ -23,6 +23,7 @@ export OPERATING_SYSTEM := os()
 export WORLD_PWD := invocation_directory()
 export GODOT_DIR := env_var_or_default("GODOT_DIR", "godot")
 export ANDROID_NDK_VERSION := "23.2.8568313"
+export OPENXR_LOADER_VERSION := env_var_or_default("OPENXR_LOADER_VERSION", "1.1.49")
 export arm64toolchain := "https://github.com/godotengine/buildroot/releases/download/godot-2023.08.x-4/aarch64-godot-linux-gnu_sdk-buildroot.tar.bz2"
 export cmdlinetools := "commandlinetools-linux-11076708_latest.zip"
 
@@ -123,6 +124,22 @@ fetch-vulkan-sdk:
         tar -xf vulkan-sdk.zip -C {{VULKAN_SDK_ROOT}}
         rm vulkan-sdk.zip
     fi
+
+fetch-android-openxr-loader:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    DEST="${GODOT_DIR}/platform/android/java/lib/libs/release/arm64-v8a"
+    if [ ! -d "$DEST" ]; then
+        echo "run after the android scons build (missing: $DEST)"
+        exit 1
+    fi
+    TMP=$(mktemp -d)
+    trap 'rm -rf "$TMP"' EXIT
+    curl -fsSL -o "$TMP/loader.aar" \
+        "https://repo1.maven.org/maven2/org/khronos/openxr/openxr_loader_for_android/${OPENXR_LOADER_VERSION}/openxr_loader_for_android-${OPENXR_LOADER_VERSION}.aar"
+    unzip -qo "$TMP/loader.aar" -d "$TMP"
+    cp "$TMP/jni/arm64-v8a/libopenxr_loader.so" "$DEST/"
+    echo "bundled Khronos OpenXR loader ${OPENXR_LOADER_VERSION} → $DEST"
 
 setup-android-sdk:
     #!/usr/bin/env bash
@@ -382,6 +399,7 @@ handle-special-cases platform target:
 
 handle-android target:
     #!/usr/bin/env bash
+    just fetch-android-openxr-loader
     cd $GODOT_DIR
     if [ "{{target}}" = "editor" ]; then
         cd platform/android/java
@@ -454,39 +472,19 @@ is-github-actions:
 # `just fetch-godot` first; the build-context flag points buildx at the
 # checkout without copying it into a tarball context.
 
-# Forward non-sensitive sccache backend config (Tigris bucket /
-# endpoint / region) as build-args; AWS creds are passed via BuildKit
-# `--secret` mounts on the RUN line and never bake into a layer.
-# Source ~/.sccache-tigris.env first to populate these env vars.
-_sccache_buildargs := \
-    if env_var_or_default("SCCACHE_BUCKET", "") == "" { "" } \
-    else { \
-        "--build-arg SCCACHE_BUCKET=" + env_var("SCCACHE_BUCKET") + " " + \
-        "--build-arg SCCACHE_ENDPOINT=" + env_var_or_default("SCCACHE_ENDPOINT", "") + " " + \
-        "--build-arg SCCACHE_REGION=" + env_var_or_default("SCCACHE_REGION", "auto") \
-    }
-
-_sccache_secretargs := \
-    if env_var_or_default("AWS_ACCESS_KEY_ID", "") == "" { "" } \
-    else { \
-        "--secret id=aws_access_key_id,env=AWS_ACCESS_KEY_ID " + \
-        "--secret id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY" \
-    }
-
 # Build the Linux x86_64 editor image (used by zone-baker).
+# Locally you can also build via the systemd quadlet:
+#   systemctl --user start godot-editor-double-build  (see quadlets/*.build)
 build-docker-editor tag="latest":
     #!/usr/bin/env bash
     set -euo pipefail
     cd "${WORLD_PWD}"
-    docker buildx build \
+    podman build \
         --build-arg TARGET=editor \
         --build-arg BINARY_NAME=godot.linuxbsd.editor.double.x86_64 \
-        {{_sccache_buildargs}} \
-        {{_sccache_secretargs}} \
         --build-context "godot-src=${WORLD_PWD}/${GODOT_DIR}" \
         --tag "${DOCKER_EDITOR_IMAGE}:{{tag}}" \
-        --load \
-        --file Dockerfile \
+        --file Containerfile \
         .
 
 # Build the Linux x86_64 template_release runtime image (used by zone-server).
@@ -494,23 +492,20 @@ build-docker-runtime tag="latest":
     #!/usr/bin/env bash
     set -euo pipefail
     cd "${WORLD_PWD}"
-    docker buildx build \
+    podman build \
         --build-arg TARGET=template_release \
         --build-arg BINARY_NAME=godot.linuxbsd.template_release.double.x86_64 \
-        {{_sccache_buildargs}} \
-        {{_sccache_secretargs}} \
         --build-context "godot-src=${WORLD_PWD}/${GODOT_DIR}" \
         --tag "${DOCKER_RUNTIME_IMAGE}:{{tag}}" \
-        --load \
-        --file Dockerfile \
+        --file Containerfile \
         .
 
-# Build both consumer-facing Docker images.
+# Build both consumer-facing images.
 build-docker tag="latest":
     just build-docker-editor {{tag}}
     just build-docker-runtime {{tag}}
 
-# Push both images to ghcr.io. Run `docker login ghcr.io -u <user>` first.
+# Push both images to ghcr.io. Run `podman login ghcr.io -u <user>` first.
 push-docker tag="latest":
-    docker push "${DOCKER_EDITOR_IMAGE}:{{tag}}"
-    docker push "${DOCKER_RUNTIME_IMAGE}:{{tag}}"
+    podman push "${DOCKER_EDITOR_IMAGE}:{{tag}}"
+    podman push "${DOCKER_RUNTIME_IMAGE}:{{tag}}"
