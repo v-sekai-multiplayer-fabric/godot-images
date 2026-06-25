@@ -1,0 +1,23 @@
+# Build the linuxbsd double-precision Godot EDITOR image as a podman systemd
+# Quadlet (.build) — the rootless-podman replacement for the docker buildx /
+# build-push-action path. `systemctl --user start godot-editor-double-build`
+# builds ghcr.io/.../godot-editor-double:latest; push separately with
+# `podman push` (or `just push-docker`).
+#
+# Prereq: the engine source at ../godot (run `just fetch-godot` in the repo
+# root first). The Containerfile pulls it in via the godot-src build context.
+[Unit]
+Description=Build the linuxbsd double-precision Godot editor image
+
+[Build]
+ImageTag=ghcr.io/v-sekai-multiplayer-fabric/godot-editor-double:latest
+# Working dir = this quadlets/ dir; the Containerfile and the godot/ checkout
+# live one level up in the repo root.
+SetWorkingDirectory=unit
+File=../Containerfile
+PodmanArgs=--build-context godot-src=../godot
+BuildArg=TARGET=editor
+BuildArg=BINARY_NAME=godot.linuxbsd.editor.double.x86_64
+
+[Install]
+WantedBy=default.target
