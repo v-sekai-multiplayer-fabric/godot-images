@@ -28,7 +28,7 @@ FROM almalinux:9 AS build
 
 ARG TARGET=editor
 ARG BINARY_NAME=godot.linuxbsd.editor.double.x86_64
-ARG SCCACHE_VERSION=v0.8.2
+ARG SCCACHE_VERSION=v0.16.0
 ARG SCCACHE_GHA_ENABLED=""
 
 RUN dnf install -y 'dnf-command(config-manager)' && \

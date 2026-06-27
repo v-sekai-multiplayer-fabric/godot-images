@@ -49,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: extractions/setup-just@v3
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.7
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Install build dependencies
         run: just install_packages
       - name: Fetch godot source
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: extractions/setup-just@v3
       - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.7
+        uses: mozilla-actions/sccache-action@v0.0.10
       - name: Install build dependencies
         run: just install_packages
       - name: Fetch llvm-mingw toolchain
@@ -120,8 +120,12 @@ jobs:
         run: |
           REF="${{ github.event.inputs.godot_ref }}"
           if [ -n "$REF" ]; then just fetch-godot "$REF"; else just fetch-godot; fi
-      - name: Build Android templates (double)
-        run: just build-platform-templates android
+      - name: Build Android templates (double, arm64 then x86_64)
+        run: |
+          just build-platform-target android template_debug arm64
+          just build-platform-target android template_debug x86_64
+          just build-platform-target android template_release arm64
+          just build-platform-target android template_release x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: android

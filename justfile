@@ -95,7 +95,7 @@ fetch-llvm-mingw:
     if [ ! -d "${MINGW_PREFIX}" ]; then
         cd $WORLD_PWD
         mkdir -p ${MINGW_PREFIX}
-        curl -o llvm-mingw.tar.xz -L https://github.com/mstorsjo/llvm-mingw/releases/download/20240917/llvm-mingw-20240917-ucrt-ubuntu-20.04-x86_64.tar.xz
+        curl -o llvm-mingw.tar.xz -L https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz
         tar --dereference -xf llvm-mingw.tar.xz -C ${MINGW_PREFIX} --strip 1
         rm -rf llvm-mingw.tar.xz
     fi
@@ -119,10 +119,10 @@ fetch-openjdk:
 fetch-vulkan-sdk:
     #!/usr/bin/env bash
     if [ ! -d "${VULKAN_SDK_ROOT}" ]; then
-        curl -L "https://github.com/godotengine/moltenvk-osxcross/releases/download/vulkan-sdk-1.3.283.0-2/MoltenVK-all.tar" -o vulkan-sdk.zip
+        curl -fsSL "https://github.com/godotengine/moltenvk-osxcross/releases/download/moltenvk-1.4.1/MoltenVK-all.tar.xz" -o vulkan-sdk.tar.xz
         mkdir -p ${VULKAN_SDK_ROOT}
-        tar -xf vulkan-sdk.zip -C {{VULKAN_SDK_ROOT}}
-        rm vulkan-sdk.zip
+        tar -xJf vulkan-sdk.tar.xz -C {{VULKAN_SDK_ROOT}}
+        rm vulkan-sdk.tar.xz
     fi
 
 fetch-android-openxr-loader:
@@ -359,12 +359,9 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
     # Remove intermediate build files before copy
     rm -rf $WORLD_PWD/$GODOT_DIR/bin/obj
 
-    # In Github runner copy editor as hardlink to save space
-    if [[ "$(just is-github-actions)" == "true" ]]; then COPYSYM="-l"; else COPYSYM=""; fi
-
     if [[ "{{target}}" == "editor" ]]; then
         mkdir -p $WORLD_PWD/editors
-        cp $COPYSYM -rf $WORLD_PWD/$GODOT_DIR/bin/* $WORLD_PWD/editors
+        rsync -a "$WORLD_PWD/$GODOT_DIR/bin/" "$WORLD_PWD/editors/"
     elif [[ "{{target}}" =~ template_* && \
             "{{platform}}" =~ ^(mac|i)os && \
             "{{osx_bundle}}" == "no" ]]; then
@@ -420,6 +417,15 @@ handle-macos target:
     if [ "{{target}}" = "editor" ]; then
         chmod +x ./bin/*.app/Contents/MacOS/* || echo "Could not set execute permission on editor"
     fi
+
+package-debug-symbols outdir="debug-symbols":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "{{outdir}}"
+    { find editors tpz \( -name "*.pdb" -o -name "*.debugsymbols" \) 2>/dev/null || true; } \
+        | while read -r f; do cp "$f" "{{outdir}}/"; done
+    echo "Debug symbols collected in {{outdir}}/"
+    ls -lh "{{outdir}}/"
 
 package-tpz folder tpzname versionpy precision="double":
     #!/usr/bin/env bash

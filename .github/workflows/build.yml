@@ -31,19 +31,20 @@ jobs:
     timeout-minutes: 360
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - name: editor
-            recipe: build-docker-editor
             image: ghcr.io/v-sekai-multiplayer-fabric/godot-editor-double
+            target: editor
+            binary: godot.linuxbsd.editor.double.x86_64
           - name: runtime
-            recipe: build-docker-runtime
             image: ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime
+            target: template_release
+            binary: godot.linuxbsd.template_release.double.x86_64
     steps:
-      - name: Checkout this repo
-        uses: actions/checkout@v4
-      - name: Set up just
-        uses: extractions/setup-just@v3
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v3
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Fetch godot source
@@ -56,8 +57,8 @@ jobs:
       - name: Build and push image (podman)
         run: |
           podman build \
-            --build-arg TARGET="${{ matrix.name == 'editor' && 'editor' || 'template_release' }}" \
-            --build-arg BINARY_NAME="${{ matrix.name == 'editor' && 'godot.linuxbsd.editor.double.x86_64' || 'godot.linuxbsd.template_release.double.x86_64' }}" \
+            --build-arg TARGET="${{ matrix.target }}" \
+            --build-arg BINARY_NAME="${{ matrix.binary }}" \
             --build-arg SCCACHE_GHA_ENABLED=true \
             --secret id=ACTIONS_CACHE_URL,env=ACTIONS_CACHE_URL \
             --secret id=ACTIONS_RUNTIME_TOKEN,env=ACTIONS_RUNTIME_TOKEN \
@@ -69,26 +70,76 @@ jobs:
           podman push "${{ matrix.image }}:latest"
           podman push "${{ matrix.image }}:${{ steps.sha.outputs.sha }}"
 
+  build-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - name: linux-editor
+            target: editor
+          - name: linux-template-release
+            target: template_release
+          - name: linux-template-debug
+            target: template_debug
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v3
+      - uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Install build dependencies
+        run: just install_packages
+      - name: Fetch godot source
+        run: |
+          REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
+          if [ -n "${REF}" ]; then just fetch-godot "${REF}"; else just fetch-godot; fi
+      - name: Resolve engine SHA
+        id: sha
+        run: echo "sha=$(git -C godot rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: just build-platform-target linuxbsd ${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.name }}-${{ steps.sha.outputs.sha }}"
+          path: |
+            editors/
+            tpz/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Package debug symbols
+        run: just package-debug-symbols debug-symbols
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.name }}-debug-symbols-${{ steps.sha.outputs.sha }}"
+          path: debug-symbols/
+          if-no-files-found: warn
+          retention-days: 90
+
   build-windows:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - name: windows-editor
             target: editor
           - name: windows-template-release
             target: template_release
+          - name: windows-template-debug
+            target: template_debug
     env:
       SCCACHE_GHA_ENABLED: "true"
     steps:
-      - name: Checkout this repo
-        uses: actions/checkout@v4
-      - name: Set up just
-        uses: extractions/setup-just@v3
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.7
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v3
+      - uses: mozilla-actions/sccache-action@v0.0.10
       - name: Install build dependencies
         run: just install_packages
       - name: Fetch llvm-mingw toolchain
@@ -103,7 +154,7 @@ jobs:
         id: sha
         run: echo "sha=$(git -C godot rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
       - name: Build
-        run: "just build-platform-target windows ${{ matrix.target }}"
+        run: just build-platform-target windows ${{ matrix.target }}
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -113,3 +164,192 @@ jobs:
             tpz/
           if-no-files-found: warn
           retention-days: 30
+      - name: Package debug symbols
+        run: just package-debug-symbols debug-symbols
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.name }}-debug-symbols-${{ steps.sha.outputs.sha }}"
+          path: debug-symbols/
+          if-no-files-found: warn
+          retention-days: 90
+
+  build-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - name: web-template-release
+            target: template_release
+          - name: web-template-debug
+            target: template_debug
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v3
+      - uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Install build dependencies
+        run: just install_packages
+      - name: Set up Emscripten
+        run: just setup-emscripten
+      - name: Fetch godot source
+        run: |
+          REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
+          if [ -n "${REF}" ]; then just fetch-godot "${REF}"; else just fetch-godot; fi
+      - name: Resolve engine SHA
+        id: sha
+        run: echo "sha=$(git -C godot rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: just build-platform-target web ${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.name }}-${{ steps.sha.outputs.sha }}"
+          path: tpz/
+          if-no-files-found: warn
+          retention-days: 30
+
+  build-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - name: android-template-release
+            target: template_release
+          - name: android-template-debug
+            target: template_debug
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v3
+      - name: Install build dependencies
+        run: just install_packages
+      - name: Fetch OpenJDK 17
+        run: just fetch-openjdk
+      - name: Set up Android SDK
+        run: just setup-android-sdk
+      - name: Fetch godot source
+        run: |
+          REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
+          if [ -n "${REF}" ]; then just fetch-godot "${REF}"; else just fetch-godot; fi
+      - name: Resolve engine SHA
+        id: sha
+        run: echo "sha=$(git -C godot rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build arm64
+        run: just build-platform-target android ${{ matrix.target }} arm64
+      - name: Build x86_64
+        run: just build-platform-target android ${{ matrix.target }} x86_64
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ matrix.name }}-${{ steps.sha.outputs.sha }}"
+          path: tpz/
+          if-no-files-found: warn
+          retention-days: 30
+
+  build-macos:
+    runs-on: macos-15
+    timeout-minutes: 360
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v3
+      - uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Install scons
+        run: brew install scons
+      - name: Fetch Vulkan SDK
+        run: just fetch-vulkan-sdk
+      - name: Fetch godot source
+        run: |
+          REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
+          if [ -n "${REF}" ]; then just fetch-godot "${REF}"; else just fetch-godot; fi
+      - name: Resolve engine SHA
+        id: sha
+        run: echo "sha=$(git -C godot rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Build editor (arm64 then x86_64 with bundle)
+        run: |
+          just build-platform-target macos editor arm64 double no
+          just build-platform-target macos editor x86_64 double yes
+      - name: Build templates (universal)
+        run: just build-platform-templates macos universal
+      - name: Upload editor artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "macos-editor-${{ steps.sha.outputs.sha }}"
+          path: editors/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload template artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "macos-templates-${{ steps.sha.outputs.sha }}"
+          path: tpz/
+          if-no-files-found: warn
+          retention-days: 30
+
+  release:
+    needs: [build-linux, build-windows, build-web, build-android, build-macos]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v3
+      - name: Resolve godot ref
+        id: ref
+        run: |
+          REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
+          if [ -z "${REF}" ]; then
+            REF=$(grep 'GODOT_PINNED_REF :=' justfile | grep -o '"[^"]*"' | tr -d '"')
+          fi
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+      - name: Tag this commit for the release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "${{ steps.ref.outputs.ref }}"
+          git push origin "${{ steps.ref.outputs.ref }}" --force
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+      - name: Zip artifacts by platform (skip debug-symbols)
+        run: |
+          cd release-assets
+          for dir in */; do
+            name="${dir%/}"
+            [[ "$name" == *-debug-symbols-* ]] && continue
+            zipname=$(echo "$name" | sed 's/-[0-9a-f]*$//')
+            zip -r "../${zipname}.zip" "${dir}"
+          done
+          cd ..
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ steps.ref.outputs.ref }}"
+          name: "Godot ${{ steps.ref.outputs.ref }}"
+          body: |
+            Multiplayer-fabric Godot builds for engine tag `${{ steps.ref.outputs.ref }}`.
+
+            | Platform | Artifacts |
+            |----------|-----------|
+            | Linux x86_64 | `linux-editor.zip`, `linux-template-release.zip`, `linux-template-debug.zip` |
+            | Windows x86_64 | `windows-editor.zip`, `windows-template-release.zip`, `windows-template-debug.zip` |
+            | macOS universal | `macos-editor.zip`, `macos-templates.zip` |
+            | Android arm64 + x86_64 | `android-template-release.zip`, `android-template-debug.zip` |
+            | Web | `web-template-release.zip`, `web-template-debug.zip` |
+
+            Docker images (Linux server):
+            - `ghcr.io/v-sekai-multiplayer-fabric/godot-editor-double:latest`
+            - `ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime:latest`
+          files: "*.zip"
+          fail_on_unmatched_files: false
+          make_latest: true
