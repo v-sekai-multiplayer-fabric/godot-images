@@ -11,7 +11,7 @@
 # Bump when a new tag from
 # https://github.com/v-sekai-multiplayer-fabric/godot/tags should
 # propagate downstream. `just fetch-godot` clones at this ref.
-export GODOT_PINNED_REF := "v2026.06.26.2103-multiplayer-fabric"
+export GODOT_PINNED_REF := "v2026.06.27.1752-multiplayer-fabric"
 export GODOT_REPO := "https://github.com/v-sekai-multiplayer-fabric/godot.git"
 
 # ─── ghcr.io image names ───────────────────────────────────────────────
