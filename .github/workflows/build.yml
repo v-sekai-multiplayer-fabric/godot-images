@@ -12,6 +12,11 @@ on:
         required: false
         default: ""
         type: string
+      tag:
+        description: "Release tag to create (default: godot ref)"
+        required: false
+        default: ""
+        type: string
   schedule:
     - cron: "0 2 * * 1"
   repository_dispatch:
@@ -303,20 +308,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: extractions/setup-just@v3
-      - name: Resolve godot ref
+      - name: Resolve godot ref and release tag
         id: ref
         run: |
           REF="${{ github.event.inputs.godot_ref || github.event.client_payload.godot_ref }}"
           if [ -z "${REF}" ]; then
             REF=$(grep 'GODOT_PINNED_REF :=' justfile | grep -o '"[^"]*"' | tr -d '"')
           fi
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "${TAG}" ]; then TAG="${REF}"; fi
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
       - name: Tag this commit for the release
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -f "${{ steps.ref.outputs.ref }}"
-          git push origin "${{ steps.ref.outputs.ref }}" --force
+          git tag -f "${{ steps.ref.outputs.tag }}"
+          git push origin "${{ steps.ref.outputs.tag }}" --force
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -334,8 +342,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "${{ steps.ref.outputs.ref }}"
-          name: "Godot ${{ steps.ref.outputs.ref }}"
+          tag_name: "${{ steps.ref.outputs.tag }}"
+          name: "Godot ${{ steps.ref.outputs.tag }}"
           body: |
             Multiplayer-fabric Godot builds for engine tag `${{ steps.ref.outputs.ref }}`.
 
