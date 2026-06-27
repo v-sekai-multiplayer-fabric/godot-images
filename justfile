@@ -515,3 +515,28 @@ build-docker tag="latest":
 push-docker tag="latest":
     podman push "${DOCKER_EDITOR_IMAGE}:{{tag}}"
     podman push "${DOCKER_RUNTIME_IMAGE}:{{tag}}"
+
+# ── Native systemd build service ─────────────────────────────────────────
+# Installs quadlets/godot-build-linuxbsd.service as a user unit so that
+# the native (no-container) editor build can be run and tracked via systemd.
+#
+# Usage after install:
+#   systemctl --user start  godot-build-linuxbsd   # kick off build
+#   systemctl --user restart godot-build-linuxbsd  # re-run after success
+#   journalctl --user -u godot-build-linuxbsd -f   # live logs
+#   systemctl --user is-active godot-build-linuxbsd # activating|active|failed
+
+install-build-service:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    UNIT_DIR="${HOME}/.config/systemd/user"
+    mkdir -p "${UNIT_DIR}"
+    sed "s|@WORKING_DIR@|${WORLD_PWD}|g" \
+        "${WORLD_PWD}/quadlets/godot-build-linuxbsd.service" \
+        > "${UNIT_DIR}/godot-build-linuxbsd.service"
+    systemctl --user daemon-reload
+    echo "Installed: ${UNIT_DIR}/godot-build-linuxbsd.service"
+    echo ""
+    echo "Start:    systemctl --user start godot-build-linuxbsd"
+    echo "Re-run:   systemctl --user restart godot-build-linuxbsd"
+    echo "Logs:     journalctl --user -u godot-build-linuxbsd -f"
