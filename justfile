@@ -107,6 +107,21 @@ setup-d3d12:
         python3 misc/scripts/install_d3d12_sdk_windows.py --mingw_prefix=${MINGW_PREFIX}
     fi
 
+setup-winrt:
+    #!/usr/bin/env bash
+    cd $WORLD_PWD/$GODOT_DIR
+    python3 misc/scripts/install_winrt.py
+
+setup-accesskit:
+    #!/usr/bin/env bash
+    cd $WORLD_PWD/$GODOT_DIR
+    python3 misc/scripts/install_accesskit.py
+
+setup-angle:
+    #!/usr/bin/env bash
+    cd $WORLD_PWD/$GODOT_DIR
+    python3 misc/scripts/install_angle.py
+
 fetch-openjdk:
     #!/usr/bin/env bash
     if [ ! -d "${JAVA_HOME}" ]; then

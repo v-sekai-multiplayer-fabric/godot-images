@@ -155,6 +155,12 @@ jobs:
           if [ -n "${REF}" ]; then just fetch-godot "${REF}"; else just fetch-godot; fi
       - name: Set up D3D12 SDK
         run: just setup-d3d12
+      - name: Install WinRT dependencies
+        run: just setup-winrt
+      - name: Install AccessKit dependencies
+        run: just setup-accesskit
+      - name: Install ANGLE dependencies
+        run: just setup-angle
       - name: Resolve engine SHA
         id: sha
         run: echo "sha=$(git -C godot rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
