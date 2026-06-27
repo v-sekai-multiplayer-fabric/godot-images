@@ -120,8 +120,12 @@ jobs:
         run: |
           REF="${{ github.event.inputs.godot_ref }}"
           if [ -n "$REF" ]; then just fetch-godot "$REF"; else just fetch-godot; fi
-      - name: Build Android templates (double)
-        run: just build-platform-templates android
+      - name: Build Android templates (double, arm64 then x86_64)
+        run: |
+          just build-platform-target android template_debug arm64
+          just build-platform-target android template_debug x86_64
+          just build-platform-target android template_release arm64
+          just build-platform-target android template_release x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: android

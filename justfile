@@ -421,6 +421,15 @@ handle-macos target:
         chmod +x ./bin/*.app/Contents/MacOS/* || echo "Could not set execute permission on editor"
     fi
 
+package-debug-symbols outdir="debug-symbols":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "{{outdir}}"
+    find editors tpz -name "*.pdb" -o -name "*.debugsymbols" 2>/dev/null \
+        | while read -r f; do cp "$f" "{{outdir}}/"; done
+    echo "Debug symbols collected in {{outdir}}/"
+    ls -lh "{{outdir}}/"
+
 package-tpz folder tpzname versionpy precision="double":
     #!/usr/bin/env bash
     cd {{folder}}
