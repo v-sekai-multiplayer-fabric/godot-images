@@ -1,0 +1,27 @@
+# Native (no-container) oneshot build of the Godot linuxbsd editor.
+#
+# Install with:   just install-build-service
+# Start with:     systemctl --user start godot-build-linuxbsd
+# Watch logs:     journalctl --user -u godot-build-linuxbsd -f
+# Re-run:         systemctl --user restart godot-build-linuxbsd
+#
+# @WORKING_DIR@ is substituted to the absolute path of godot-images/
+# by `just install-build-service` at install time.
+
+[Unit]
+Description=Build Godot linuxbsd editor (double, native)
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=0
+WorkingDirectory=@WORKING_DIR@
+Environment=GODOT_DIR=../godot
+ExecStart=just build-platform-target linuxbsd editor auto double no ""
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=godot-build-linuxbsd
+
+[Install]
+WantedBy=default.target
