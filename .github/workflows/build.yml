@@ -76,6 +76,10 @@ jobs:
           podman push "${{ matrix.image }}:${{ steps.sha.outputs.sha }}"
 
   build-linux:
+    # TEMPORARILY DISABLED — native Linux builds are paused. Re-enable by
+    # removing this `if: false` and restoring `build-linux` to the `release`
+    # job's `needs:` list below.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
@@ -180,7 +184,8 @@ jobs:
           retention-days: 90
 
   release:
-    needs: [build-linux, build-windows]
+    # build-linux temporarily disabled — Windows-only release for now.
+    needs: [build-windows]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -229,7 +234,6 @@ jobs:
 
             | Platform | Artifacts |
             |----------|-----------|
-            | Linux x86_64 | `linux-editor.zip`, `linux-template-release.zip`, `linux-template-debug.zip` |
             | Windows x86_64 | `windows-editor.zip`, `windows-template-release.zip`, `windows-template-debug.zip` |
 
             Docker images (Linux server):
