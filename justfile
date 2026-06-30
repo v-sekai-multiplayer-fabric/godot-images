@@ -11,7 +11,7 @@
 # Bump when a new tag from
 # https://github.com/v-sekai-multiplayer-fabric/godot/tags should
 # propagate downstream. `just fetch-godot` clones at this ref.
-export GODOT_PINNED_REF := "v2026.06.27.1752-multiplayer-fabric"
+export GODOT_PINNED_REF := "v2026.06.27.1907-multiplayer-fabric"
 export GODOT_REPO := "https://github.com/v-sekai-multiplayer-fabric/godot.git"
 
 # ─── ghcr.io image names ───────────────────────────────────────────────
@@ -362,6 +362,15 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
     if [[ "{{target}}" == "editor" ]]; then
         mkdir -p $WORLD_PWD/editors
         rsync -a "$WORLD_PWD/$GODOT_DIR/bin/" "$WORLD_PWD/editors/"
+        # Gate: the build recipe is not `set -e`, so a failed/empty scons run still
+        # reaches this copy and would package an editors/ that holds only build_deps
+        # (the d3d12 / mesa inputs) and no engine binary -- exactly the broken
+        # windows-editor.zip symptom. Fail here so a binary-less editor is never released.
+        if ! find "$WORLD_PWD/editors" -iname 'godot.*editor*' -not -path '*/build_deps/*' | grep -q .; then
+            echo "ERROR: no Godot editor binary produced for {{platform}} {{target}}; refusing to package an editor with only build_deps." >&2
+            echo "editors/ contains:" >&2; ls -A "$WORLD_PWD/editors" >&2
+            exit 1
+        fi
     elif [[ "{{target}}" =~ template_* && \
             "{{platform}}" =~ ^(mac|i)os && \
             "{{osx_bundle}}" == "no" ]]; then
@@ -370,6 +379,13 @@ build-platform-target platform target arch="auto" precision="double" osx_bundle=
     elif [[ "{{target}}" =~ template_* ]]; then
         mkdir -p $WORLD_PWD/tpz
         cp -rf $WORLD_PWD/$GODOT_DIR/bin/* $WORLD_PWD/tpz
+        # Same gate for export templates (the template zips have the identical
+        # silent-failure risk, and downstream MSIX/zip builds consume them).
+        if ! find "$WORLD_PWD/tpz" -iname 'godot.*template*' -not -path '*/build_deps/*' | grep -q .; then
+            echo "ERROR: no Godot template binary produced for {{platform}} {{target}}; refusing to package a template with only build_deps." >&2
+            echo "tpz/ contains:" >&2; ls -A "$WORLD_PWD/tpz" >&2
+            exit 1
+        fi
     fi
 
 build-platform-templates platform arch="auto" precision="double":
