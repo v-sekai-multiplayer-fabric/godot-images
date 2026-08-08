@@ -76,10 +76,6 @@ jobs:
           podman push "${{ matrix.image }}:${{ steps.sha.outputs.sha }}"
 
   build-linux:
-    # TEMPORARILY DISABLED — native Linux builds are paused. Re-enable by
-    # removing this `if: false` and restoring `build-linux` to the `release`
-    # job's `needs:` list below.
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
@@ -184,8 +180,7 @@ jobs:
           retention-days: 90
 
   release:
-    # build-linux temporarily disabled — Windows-only release for now.
-    needs: [build-windows]
+    needs: [build-windows, build-linux]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -235,10 +230,14 @@ jobs:
             | Platform | Artifacts |
             |----------|-----------|
             | Windows x86_64 | `windows-editor.zip`, `windows-template-release.zip`, `windows-template-debug.zip` |
+            | Linux x86_64 | `linux-editor.zip`, `linux-template-release.zip`, `linux-template-debug.zip` |
 
-            Docker images (Linux server):
-            - `ghcr.io/v-sekai-multiplayer-fabric/godot-editor-double:latest`
-            - `ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime:latest`
+            Docker images (Linux server), tagged `latest` and the short engine SHA:
+            - `ghcr.io/v-sekai-multiplayer-fabric/godot-editor-double`
+            - `ghcr.io/v-sekai-multiplayer-fabric/zone-godot-runtime`
+
+            Pin an image by its SHA tag rather than `latest`, because `latest`
+            moves with every build.
           files: "*.zip"
           fail_on_unmatched_files: false
           make_latest: true
