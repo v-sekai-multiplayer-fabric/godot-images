@@ -198,10 +198,15 @@ build-osxcross:
 nil:
     echo "nil: Suceeded."
 
+# `apt-get update` first: the GitHub runner image ships a package index
+# that goes stale between image releases, so `apt install` 404s on point
+# releases that have since been superseded on the mirror (e.g.
+# libudev-dev 255.4-1ubuntu8.16).
 install_packages:
     if dnf >/dev/null 2>&1; then \
         dnf install -y hyperfine vulkan xz bzip2 file gcc gcc-c++ zlib-devel libmpc-devel mpfr-devel gmp-devel clang just parallel scons mold pkgconfig libX11-devel libXcursor-devel libXrandr-devel libXinerama-devel libXi-devel wayland-devel mesa-libGL-devel mesa-libGLU-devel alsa-lib-devel pulseaudio-libs-devel libudev-devel libstdc++-static libatomic-static cmake ccache patch libxml2-devel openssl openssl-devel git unzip; \
     else \
+        sudo apt-get update; \
         sudo apt install -y build-essential hyperfine vulkan-tools xz-utils bzip2 file gcc zlib1g-dev libmpc-dev libmpfr-dev libgmp-dev clang just parallel scons mold pkg-config libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev cmake ccache patch libxml2-dev openssl libssl-dev git unzip; \
     fi
 
