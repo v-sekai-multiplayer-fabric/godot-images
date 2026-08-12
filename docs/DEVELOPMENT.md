@@ -1,7 +1,7 @@
 # Developer documentation
 
 Local-first build infrastructure for the
-[`v-sekai-multiplayer-fabric/godot`](https://github.com/v-sekai-multiplayer-fabric/godot)
+[`v-sekai-multiplayer-fabric/fabric-godot-core`](https://github.com/v-sekai-multiplayer-fabric/fabric-godot-core)
 engine fork. There is no CI workflow — every output of this repo is
 produced by running a [`just`](https://github.com/casey/just) recipe on a
 developer machine. The recipes cross-compile from Linux to every
@@ -67,16 +67,21 @@ and copies `godot` out — never recompiles the engine from source.
 
 ## Engine pin
 
-All recipes default to a hard-coded tag of
-[`v-sekai-multiplayer-fabric/godot`](https://github.com/v-sekai-multiplayer-fabric/godot/tags)
-— not a moving branch, and not a submodule / `git-subrepo`. The tag lives
-once at the top of `justfile`:
+All recipes default to a hard-coded ref of
+[`v-sekai-multiplayer-fabric/fabric-godot-core`](https://github.com/v-sekai-multiplayer-fabric/fabric-godot-core)
+— not a submodule / `git-subrepo`. The repo and ref live once at the top
+of `justfile`:
 
 ```just
-export GODOT_PINNED_REF := "v2026.05.28.2155-multiplayer-fabric"
+export GODOT_PINNED_REF := "gyre"
+export GODOT_REPO := "https://github.com/v-sekai-multiplayer-fabric/fabric-godot-core.git"
 ```
 
-To bump the engine version: edit that line and re-run `just fetch-godot`.
+The pin is currently the [`gyre`](https://github.com/v-sekai-multiplayer-fabric/fabric-godot-core/tree/gyre)
+branch rather than a tag, so builds track its moving tip: `fetch-godot`
+re-fetches the ref on every run instead of reusing a stale local copy,
+and re-clones automatically if `godot/` still points at another remote.
+To bump the engine version: edit those lines and re-run `just fetch-godot`.
 The fork is freshly fetched on every `fetch-godot` invocation, so no
 in-tree copy ever drifts. Override for an ad-hoc build with
 `just fetch-godot <branch-or-sha>`.
