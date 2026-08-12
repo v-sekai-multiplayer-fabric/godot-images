@@ -209,16 +209,25 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets/
-      - name: Zip artifacts by platform (skip debug-symbols)
+      # A release carries the export templates a project ships with, and nothing else. The
+      # editors still build -- build-docker publishes godot-editor-double from that target --
+      # but an editor is how you make a game, not part of one, and at half a gigabyte each
+      # they were most of what the release weighed. Debug templates go the same way: a
+      # release build is what a release ships.
+      #
+      # Everything still reaches the artifacts tab of its own run, which is where a debug
+      # template or an editor is wanted.
+      - name: Zip the release templates
         run: |
           cd release-assets
-          for dir in */; do
+          shopt -s nullglob
+          for dir in *-template-release-*/; do
             name="${dir%/}"
-            [[ "$name" == *-debug-symbols-* ]] && continue
             zipname=$(echo "$name" | sed 's/-[0-9a-f]*$//')
             zip -r "../${zipname}.zip" "${dir}"
           done
           cd ..
+          ls -l *.zip
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -227,10 +236,15 @@ jobs:
           body: |
             Multiplayer-fabric Godot builds for engine tag `${{ steps.ref.outputs.ref }}`.
 
-            | Platform | Artifacts |
-            |----------|-----------|
-            | Windows x86_64 | `windows-editor.zip`, `windows-template-release.zip`, `windows-template-debug.zip` |
-            | Linux x86_64 | `linux-editor.zip`, `linux-template-release.zip`, `linux-template-debug.zip` |
+            Export templates, double precision.
+
+            | Platform | Artifact |
+            |----------|----------|
+            | Windows x86_64 | `windows-template-release.zip` |
+            | Linux x86_64 | `linux-template-release.zip` |
+
+            Editors and debug templates are not released. They are built, and each is on the
+            artifacts tab of the run that built it.
 
             Docker images (Linux server), tagged `latest` and the short engine SHA:
             - `ghcr.io/v-sekai-multiplayer-fabric/godot-editor-double`
