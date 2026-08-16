@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       godot_ref:
-        description: "git ref of v-sekai-multiplayer-fabric/godot (default: justfile pin)"
+        description: "git ref of v-sekai-multiplayer-fabric/fabric-godot-core (default: justfile pin)"
         required: false
         default: ""
         type: string
@@ -225,7 +225,7 @@ jobs:
           tag_name: "${{ steps.ref.outputs.tag }}"
           name: "Godot ${{ steps.ref.outputs.tag }}"
           body: |
-            Multiplayer-fabric Godot builds for engine tag `${{ steps.ref.outputs.ref }}`.
+            Multiplayer-fabric Godot builds for engine ref `${{ steps.ref.outputs.ref }}`.
 
             | Platform | Artifacts |
             |----------|-----------|

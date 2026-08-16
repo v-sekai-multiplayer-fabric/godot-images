@@ -1,18 +1,19 @@
-# Build recipes for v-sekai-multiplayer-fabric/godot — cross-compile from
+# Build recipes for v-sekai-multiplayer-fabric/fabric-godot-core — cross-compile from
 # Linux to every supported platform, or build natively where simpler.
 # Local-first: there's no CI workflow; developers run these recipes on
 # their own machine and (for the editor + runtime Docker images) push the
 # results to ghcr.io with `just push-docker`.
 #
-# Engine source is cloned into ./godot at the pinned tag below; override
+# Engine source is cloned into ./godot at the pinned ref below; override
 # the directory with $GODOT_DIR or the ref with `just fetch-godot <ref>`.
 
 # ─── Pinned engine ref ─────────────────────────────────────────────────
-# Bump when a new tag from
-# https://github.com/v-sekai-multiplayer-fabric/godot/tags should
-# propagate downstream. `just fetch-godot` clones at this ref.
-export GODOT_PINNED_REF := "v2026.06.27.1907-multiplayer-fabric"
-export GODOT_REPO := "https://github.com/v-sekai-multiplayer-fabric/godot.git"
+# Currently a moving branch, not a tag:
+# https://github.com/v-sekai-multiplayer-fabric/fabric-godot-core/tree/gyre
+# `just fetch-godot` clones at this ref and re-fetches it every run, so a
+# branch pin always lands on the current tip.
+export GODOT_PINNED_REF := "gyre"
+export GODOT_REPO := "https://github.com/v-sekai-multiplayer-fabric/fabric-godot-core.git"
 
 # ─── ghcr.io image names ───────────────────────────────────────────────
 # Matches the FROM lines in the consumer repos (zone-baker, zone-server).
@@ -42,30 +43,38 @@ default: fetch-godot build-docker
 
 # ── Engine source ────────────────────────────────────────────────────────
 
-# Clone (or update) the godot fork at the pinned tag.
+# Clone (or update) the engine fork at the pinned ref.
 # Override the ref with `just fetch-godot <ref>`.
 #
-# Uses --depth=1 --branch <ref> --single-branch so only the tree at one
-# tag is fetched (one packfile, no commit history, no demand-loading of
-# blobs). Much faster than `git clone --filter=blob:none` + checkout for
-# a single-tag build because there's only one round-trip and the
-# checkout reads from the local packfile instead of issuing per-blob
-# lazy fetches against the remote.
+# Uses --depth=1 --single-branch so only the tree at one ref is fetched
+# (one packfile, no commit history, no demand-loading of blobs). Much
+# faster than `git clone --filter=blob:none` + checkout for a single-ref
+# build because there's only one round-trip and the checkout reads from
+# the local packfile instead of issuing per-blob lazy fetches against
+# the remote.
 fetch-godot ref=GODOT_PINNED_REF:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "${WORLD_PWD}"
+    # A checkout of a different fork (or of an older GODOT_REPO) can't be
+    # updated in place — drop it so the clone below re-runs against the
+    # current remote.
+    if [ -d "${GODOT_DIR}/.git" ] \
+       && [ "$(git -C "${GODOT_DIR}" remote get-url origin 2>/dev/null || true)" != "${GODOT_REPO}" ]; then
+        echo "godot checkout points at a different remote; re-cloning ${GODOT_REPO}"
+        rm -rf "${GODOT_DIR}"
+    fi
     if [ -d "${GODOT_DIR}/.git" ]; then
         cd "${GODOT_DIR}"
-        # Already cloned. Only hit the network if the ref isn't local.
-        if git rev-parse --verify "{{ref}}" >/dev/null 2>&1; then
-            git checkout --detach "$(git rev-parse "{{ref}}^{commit}" 2>/dev/null || echo "{{ref}}")"
-        else
-            # Shallow-fetch just this ref into the existing repo. Try as
-            # a tag first; fall back to a branch ref name.
-            git fetch --depth=1 origin "refs/tags/{{ref}}:refs/tags/{{ref}}" 2>/dev/null \
-                || git fetch --depth=1 origin "{{ref}}"
+        # Already cloned. Re-fetch the ref rather than trusting a local
+        # copy: the pin may be a branch, whose tip moves. Try as a tag
+        # first; fall back to a branch ref name, then to a local ref
+        # (offline, or a raw SHA already in the packfile).
+        if git fetch --depth=1 origin "refs/tags/{{ref}}:refs/tags/{{ref}}" 2>/dev/null \
+           || git fetch --depth=1 origin "{{ref}}" 2>/dev/null; then
             git checkout --detach "$(git rev-parse FETCH_HEAD^{commit})"
+        else
+            git checkout --detach "$(git rev-parse "{{ref}}^{commit}")"
         fi
     else
         git clone --depth=1 --single-branch \
@@ -189,10 +198,15 @@ build-osxcross:
 nil:
     echo "nil: Suceeded."
 
+# `apt-get update` first: the GitHub runner image ships a package index
+# that goes stale between image releases, so `apt install` 404s on point
+# releases that have since been superseded on the mirror (e.g.
+# libudev-dev 255.4-1ubuntu8.16).
 install_packages:
     if dnf >/dev/null 2>&1; then \
         dnf install -y hyperfine vulkan xz bzip2 file gcc gcc-c++ zlib-devel libmpc-devel mpfr-devel gmp-devel clang just parallel scons mold pkgconfig libX11-devel libXcursor-devel libXrandr-devel libXinerama-devel libXi-devel wayland-devel mesa-libGL-devel mesa-libGLU-devel alsa-lib-devel pulseaudio-libs-devel libudev-devel libstdc++-static libatomic-static cmake ccache patch libxml2-devel openssl openssl-devel git unzip; \
     else \
+        sudo apt-get update; \
         sudo apt install -y build-essential hyperfine vulkan-tools xz-utils bzip2 file gcc zlib1g-dev libmpc-dev libmpfr-dev libgmp-dev clang just parallel scons mold pkg-config libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libwayland-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev cmake ccache patch libxml2-dev openssl libssl-dev git unzip; \
     fi
 

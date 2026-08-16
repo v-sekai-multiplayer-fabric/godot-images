@@ -1,10 +1,10 @@
-# Builds a Godot engine binary from `v-sekai-multiplayer-fabric/godot` source.
+# Builds a Godot engine binary from `v-sekai-multiplayer-fabric/fabric-godot-core` source.
 # Parameterised over SCons target (editor or template_release) so the same
 # Dockerfile produces both flavours — see justfile recipes
 # `build-docker-editor` / `build-docker-runtime`.
 #
 # Build contexts:
-#   godot-src — checkout of v-sekai-multiplayer-fabric/godot @ <ref>
+#   godot-src — checkout of v-sekai-multiplayer-fabric/fabric-godot-core @ <ref>
 #
 # Build args:
 #   TARGET       SCons `target=` value: `editor` or `template_release`
