@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "entities-images: local-first build infrastructure for the fabric Godot fork"
+abstract: >
+  Builds of the multiplayer-fabric Godot engine fork: player export templates and
+  editor binaries, cross-compiled from Linux to every supported platform and built
+  natively where that is simpler. There is deliberately no CI workflow -- every
+  output is produced by running a just recipe on a developer machine, which is the
+  same rule the workspace states about where a thing is built: CI is the overflow,
+  not the first attempt, and a cold runner rebuilds what an incremental local build
+  already has.
+authors:
+  - family-names: Lee
+    given-names: "K. S. Ernest (iFire)"
+    email: ernest.lee@chibifire.com
+    orcid: "https://orcid.org/0000-0003-4570-1436"
+version: 0.1.0-dev.1
+date-released: "2026-08-17"
+license: MIT
+repository-code: "https://github.com/v-sekai-multiplayer-fabric/entities-images"
+keywords:
+  - godot
+  - cross-compilation
+  - build-infrastructure
+  - reproducible-builds
+references:
+
+  - type: software
+    title: "entities-godot: the multiplayer-fabric Godot fork"
+    url: "https://github.com/v-sekai-multiplayer-fabric/entities-godot"
+    notes: >
+      The engine every output here is a build of. The pin lives in docs/DEVELOPMENT.md
+      rather than here, so there is one place that says which commit shipped.
+
+  - type: software
+    title: "just: a command runner"
+    authors:
+      - family-names: Rodarmor
+        given-names: Casey
+    url: "https://github.com/casey/just"
+    notes: >
+      Every artefact this repository produces is a just recipe. It is the build system,
+      not a convenience wrapper over one.
+
+  - type: software
+    title: "SCons"
+    url: "https://scons.org/"
+    notes: "Godot's own build system, which the recipes invoke rather than replace."
